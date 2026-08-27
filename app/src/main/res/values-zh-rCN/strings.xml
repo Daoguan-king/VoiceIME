@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VoiceIME</string>
+    <string name="subtype_voice">语音输入</string>
+
+    <string name="btn_start">🎤</string>
+    <string name="btn_stop">⏹ 结束</string>
+
+    <string name="status_idle">就绪</string>
+    <string name="status_recording">正在录音…点击结束</string>
+    <string name="status_partial">正在识别：</string>
+    <string name="status_recognizing">正在识别…</string>
+    <string name="status_done">已上屏</string>
+    <string name="status_empty">未识别到语音</string>
+    <string name="status_no_permission">需要麦克风权限</string>
+    <string name="status_model_missing">缺少模型文件</string>
+    <string name="status_downloading">正在下载 SenseVoice 模型…</string>
+    <string name="status_download_failed">模型下载失败</string>
+    <string name="status_model_ready">模型就绪，切换到本输入法即可说话</string>
+
+    <string name="main_title">VoiceIME（SenseVoice 本地语音输入）</string>
+    <string name="main_desc">供同文输入法（Trime）调用的本地语音输入法。先在系统设置中启用本输入法，再按 Trime 的语音键（VOICE_ASSIST）即可切换过来。</string>
+    <string name="btn_permission">授予麦克风权限</string>
+    <string name="btn_download">下载 SenseVoice 模型</string>
+    <string name="label_auto_switch">识别上屏后自动切回上一个输入法</string>
+    <string name="label_model_dir">模型目录</string>
+    <string name="toast_granted">麦克风权限已授予</string>
+    <string name="toast_need_grant">未授予麦克风权限</string>
+    <string name="toast_download_started">已在后台开始下载</string>
+    <string name="toast_download_done">下载完成</string>
+    <string name="toast_download_failed">下载失败</string>
+
+    <!-- 首次启用引导 -->
+    <string name="onboard_title">欢迎使用 VoiceIME</string>
+    <string name="onboard_intro">基于 sherpa-onnx SenseVoice 的极简本地语音输入法。与同文输入法配合使用，共四步：</string>
+    <string name="step_ime_title">1. 在系统设置中启用本输入法</string>
+    <string name="step_ime_desc">设置 → 系统 → 语言与输入法 → 屏幕键盘 → 启用 VoiceIME。同文只枚举"已启用"的输入法。</string>
+    <string name="btn_open_ime_settings">打开系统输入法设置</string>
+    <string name="step_mic_title">2. 授予麦克风权限</string>
+    <string name="step_mic_desc">录音只在本地进行，不会上传。</string>
+    <string name="btn_grant_mic">授予权限</string>
+    <string name="step_model_title">3. 下载 SenseVoice 模型</string>
+    <string name="step_model_desc">int8 模型约 170 MB，存放在应用私有目录。</string>
+    <string name="btn_download_model">下载模型（int8，约 170 MB）</string>
+    <string name="step_trime_title">4. 配置同文输入法</string>
+    <string name="step_trime_desc">同文输入法：设置 → 通用 → 首选语音输入法 → 选择 VoiceIME。然后在键盘上触发语音键（通常为长按空格或 ✾ 键，需在主题中绑定 VOICE_ASSIST）。</string>
+    <string name="btn_start_use">我知道了，开始使用</string>
+
+    <string name="status_ok">✓ 正常</string>
+    <string name="status_ime_enabled">输入法已在系统中启用</string>
+    <string name="status_ime_disabled">输入法尚未在系统中启用</string>
+    <string name="status_mic_ok">麦克风权限已授予</string>
+    <string name="status_mic_missing">未授予麦克风权限</string>
+    <string name="status_model_ok">模型已就绪</string>
+    <string name="status_model_missing_short">模型未下载</string>
+
+    <!-- 模型与语言选择 -->
+    <string name="label_variant">SenseVoice 模型</string>
+    <string name="label_language">识别语言</string>
+    <string-array name="model_variant_labels">
+        <item>Small（int8，约 170 MB，推荐）</item>
+        <item>Small（fp32，约 900 MB）</item>
+    </string-array>
+    <string-array name="model_variant_values">
+        <item>small-int8</item>
+        <item>small-full</item>
+    </string-array>
+    <string-array name="language_labels">
+        <item>自动</item>
+        <item>中文</item>
+        <item>英文</item>
+        <item>日文</item>
+        <item>韩文</item>
+        <item>粤语</item>
+    </string-array>
+    <string-array name="language_values">
+        <item>auto</item>
+        <item>zh</item>
+        <item>en</item>
+        <item>ja</item>
+        <item>ko</item>
+        <item>yue</item>
+    </string-array>
+
+    <!-- 调试参数区 -->
+    <string name="debug_title">调试参数（改完点保存，重新录音生效）</string>
+    <string name="debug_desc">对照官方 Demo 调参：阈值 / 停顿成段 / 并发路数 / 读取粒度等。数值保存到本机设置，重启 App 仍在，无需重新编译。</string>
+    <string name="debug_save">保存参数</string>
+    <string name="debug_reset">恢复默认</string>
+    <string name="debug_saved">已保存，重新录音生效</string>
+    <string name="debug_reset_done">已恢复默认值</string>
+    <string name="debug_save_failed">保存失败：%1$s</string>
+    <string name="dbg_vad_threshold">VAD 阈值 threshold（0.1~0.9）</string>
+    <string name="dbg_min_silence">停顿成段秒数 minSilence（0.1~2.0）</string>
+    <string name="dbg_min_speech">最短语音秒数 minSpeech（0.1~2.0）</string>
+    <string name="dbg_window">VAD 窗口 windowSize（256/512）</string>
+    <string name="dbg_max_speech">最长语音秒数 maxSpeech（0~60）</string>
+    <string name="dbg_threads">识别线程数 numThreads（1~8）</string>
+    <string name="dbg_workers">并发解码路数（1~8）</string>
+    <string name="dbg_auto_stop">静音自动停止 ms（200~5000）</string>
+    <string name="dbg_preview_chars">预览保留字符数（32~300）</string>
+    <string name="dbg_read_chunk">录音读取粒度 ms（16~200）</string>
+    <string name="dbg_preview_interval">预览识别间隔 ms（50~2000）</string>
+</resources>
