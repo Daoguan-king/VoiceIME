@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VoiceIME</string>
+    <string name="subtype_voice">Voice input</string>
+
+    <string name="btn_start">🎤</string>
+    <string name="btn_stop">⏹ 结束</string>
+
+    <string name="status_idle">Ready</string>
+    <string name="status_recording">Recording… tap stop when done</string>
+    <string name="status_partial">Recognizing:</string>
+    <string name="status_recognizing">Recognizing…</string>
+    <string name="status_done">Committed</string>
+    <string name="status_empty">No speech recognized</string>
+    <string name="status_no_permission">Microphone permission required</string>
+    <string name="status_model_missing">Model files missing</string>
+    <string name="status_downloading">Downloading SenseVoice model…</string>
+    <string name="status_download_failed">Model download failed</string>
+    <string name="status_model_ready">Model ready. Switch to this IME and speak.</string>
+
+    <string name="main_title">VoiceIME（SenseVoice local voice input）</string>
+    <string name="main_desc">Local voice input IME for Trime. Install &amp; enable this IME in system settings, then press Trime\'s voice key (VOICE_ASSIST) to switch here.</string>
+    <string name="btn_permission">Grant microphone permission</string>
+    <string name="btn_download">Download SenseVoice model</string>
+    <string name="label_auto_switch">Auto switch back to previous IME after commit</string>
+    <string name="label_model_dir">Model directory</string>
+    <string name="toast_granted">Microphone granted</string>
+    <string name="toast_need_grant">Microphone not granted</string>
+    <string name="toast_download_started">Download started in background</string>
+    <string name="toast_download_done">Download finished</string>
+    <string name="toast_download_failed">Download failed</string>
+
+    <!-- 首次启用引导 -->
+    <string name="onboard_title">Welcome to VoiceIME</string>
+    <string name="onboard_intro">A minimal local voice input IME powered by sherpa-onnx SenseVoice. Four quick steps to get it working with Trime (同文输入法):</string>
+    <string name="step_ime_title">1. Enable this IME in system settings</string>
+    <string name="step_ime_desc">Settings → System → Languages &amp; input → On-screen keyboard → enable VoiceIME. Trime only finds enabled IMEs.</string>
+    <string name="btn_open_ime_settings">Open system IME settings</string>
+    <string name="step_mic_title">2. Grant microphone permission</string>
+    <string name="step_mic_desc">Recording happens locally on this device.</string>
+    <string name="btn_grant_mic">Grant permission</string>
+    <string name="step_model_title">3. Download the SenseVoice model</string>
+    <string name="step_model_desc">About 170 MB for the int8 model, stored in the app private directory.</string>
+    <string name="btn_download_model">Download model (int8, ~170 MB)</string>
+    <string name="step_trime_title">4. Configure Trime (同文输入法)</string>
+    <string name="step_trime_desc">In Trime: Settings → General → Preferred voice input → select VoiceIME. Then press the voice key on the keyboard (usually long-press space or the ✾ key, bound to VOICE_ASSIST in your theme).</string>
+    <string name="btn_start_use">Got it, start using</string>
+
+    <string name="status_ok">✓ OK</string>
+    <string name="status_ime_enabled">IME enabled in system</string>
+    <string name="status_ime_disabled">IME not enabled in system yet</string>
+    <string name="status_mic_ok">Microphone granted</string>
+    <string name="status_mic_missing">Microphone not granted</string>
+    <string name="status_model_ok">Model ready</string>
+    <string name="status_model_missing_short">Model missing</string>
+
+    <!-- 模型与语言选择 -->
+    <string name="label_variant">SenseVoice model</string>
+    <string name="label_language">Recognition language</string>
+    <string-array name="model_variant_labels">
+        <item>Small (int8, ~170 MB, recommended)</item>
+        <item>Small (fp32, ~900 MB)</item>
+    </string-array>
+    <string-array name="model_variant_values">
+        <item>small-int8</item>
+        <item>small-full</item>
+    </string-array>
+    <string-array name="language_labels">
+        <item>Auto</item>
+        <item>Chinese</item>
+        <item>English</item>
+        <item>Japanese</item>
+        <item>Korean</item>
+        <item>Cantonese</item>
+    </string-array>
+    <string-array name="language_values">
+        <item>auto</item>
+        <item>zh</item>
+        <item>en</item>
+        <item>ja</item>
+        <item>ko</item>
+        <item>yue</item>
+    </string-array>
+
+    <!-- 调试参数区 -->
+    <string name="debug_title">Debug params (save then re-record to apply)</string>
+    <string name="debug_desc">Tune like the official demo: VAD threshold / segment / concurrency / read granularity. Values persist on device, no rebuild needed.</string>
+    <string name="debug_save">Save params</string>
+    <string name="debug_reset">Reset defaults</string>
+    <string name="debug_saved">Saved, re-record to apply</string>
+    <string name="debug_reset_done">Defaults restored</string>
+    <string name="debug_save_failed">Save failed: %1$s</string>
+    <string name="dbg_vad_threshold">VAD threshold (0.1~0.9)</string>
+    <string name="dbg_min_silence">Segment silence secs minSilence (0.1~2.0)</string>
+    <string name="dbg_min_speech">Min speech secs minSpeech (0.1~2.0)</string>
+    <string name="dbg_window">VAD windowSize (256/512)</string>
+    <string name="dbg_max_speech">Max speech secs maxSpeech (0~60)</string>
+    <string name="dbg_threads">Decode threads numThreads (1~8)</string>
+    <string name="dbg_workers">Concurrent decodes (1~8)</string>
+    <string name="dbg_auto_stop">Silence auto-stop ms (200~5000)</string>
+    <string name="dbg_preview_chars">Preview max chars (32~300)</string>
+    <string name="dbg_read_chunk">Read chunk ms (16~200)</string>
+    <string name="dbg_preview_interval">Preview interval ms (50~2000)</string>
+</resources>

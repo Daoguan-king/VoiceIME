@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 面板（浅色） -->
+    <color name="panel_gradient_start">#F5F6FB</color>
+    <color name="panel_gradient_end">#E9EBF7</color>
+    <color name="panel_stroke">#D3D7EC</color>
+
+    <!-- 按钮 -->
+    <color name="accent_start">#5B5BD6</color>
+    <color name="accent_end">#8A5CF6</color>
+    <color name="accent_pressed">#4A4AB8</color>
+    <color name="recording_red">#E5484D</color>
+    <color name="recording_red_pressed">#C73A3F</color>
+
+    <!-- 语言小按钮（浅色面板上使用半透明深色） -->
+    <color name="lang_chip_bg">#141F2340</color>
+    <color name="lang_chip_stroke">#331F2340</color>
+
+    <!-- 文字 -->
+    <color name="text_primary">#1F2340</color>
+    <color name="text_secondary">#5A5F7A</color>
+    <color name="text_desc">#666666</color>
+    <color name="text_status">#444444</color>
+    <color name="text_debug_label">#555555</color>
+
+    <!-- 电平条 -->
+    <color name="level_bar">#8A5CF6</color>
+</resources>

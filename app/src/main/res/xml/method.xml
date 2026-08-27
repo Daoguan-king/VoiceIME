@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 与 BiBi-Keyboard 的 method.xml 相同的注册方式：imeSubtypeMode="voice" -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.voiceime.MainActivity">
+
+    <subtype
+        android:label="@string/subtype_voice"
+        android:imeSubtypeLocale="zh_CN"
+        android:imeSubtypeMode="voice" />
+
+</input-method>
