@@ -22,7 +22,17 @@ class PermissionActivity : Activity() {
             finish()
             return
         }
-        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
+        // 顺带请求通知权限（Android 13+），用于下载进度通知
+        val permissions = buildList {
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        requestPermissions(permissions.toTypedArray(), REQUEST_RECORD_AUDIO)
     }
 
     override fun onRequestPermissionsResult(

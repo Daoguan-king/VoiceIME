@@ -57,6 +57,11 @@ class VoiceImeService : InputMethodService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    override fun onCreate() {
+        super.onCreate()
+        AppLog.init(this)
+    }
+
     /** 识别器创建/重建锁（解码本身不锁，支持并发解码） */
     private val recognizerLock = Any()
 
@@ -65,6 +70,9 @@ class VoiceImeService : InputMethodService() {
 
     /** 调试参数（每次录音开始时从设置读取） */
     private var debug = DebugParams.Values()
+
+    /** SenseVoice 情感/事件检测（每次录音开始时读取） */
+    private var emotionEvent = false
 
     @Volatile
     private var recording = false
@@ -95,17 +103,17 @@ class VoiceImeService : InputMethodService() {
         workersProvider = { debug.workers },
         previewIntervalMsProvider = { debug.previewIntervalMs },
         previewCharsProvider = { debug.previewChars },
-        decode = ::decode,
+        decode = ::decodeText,
         onPreview = ::onPipelinePreview,
     )
 
     // ---- 当前会话模型 ----
-    private var sessionModelPath = ""
-    private var sessionTokensPath = ""
+    private var sessionModelDir: File? = null
+    private var sessionModelId = ""
     private var sessionRecognizerKey = ""
 
-    /** 已加载的识别器（模型路径/语言变化时重建） */
-    private var recognizer: SenseVoiceRecognizer? = null
+    /** 已加载的识别器（模型/语言变化时重建） */
+    private var recognizer: VoiceRecognizer? = null
     private var recognizerKey = ""
 
     private var micButton: Button? = null
@@ -118,9 +126,13 @@ class VoiceImeService : InputMethodService() {
 
     private fun prefs() = getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
 
-    private val modelVariant: String
-        get() = prefs().getString(Prefs.KEY_MODEL_VARIANT, VoiceModelManager.VARIANT_INT8)
-            ?: VoiceModelManager.VARIANT_INT8
+    private val modelSpec: ModelSpec
+        get() {
+            val sp = prefs()
+            return AsrModels.byId(sp.getString(Prefs.KEY_MODEL, null))
+                ?: AsrModels.byLegacyVariant(sp.getString(Prefs.KEY_MODEL_VARIANT, null))
+                ?: AsrModels.SENSE_VOICE_INT8
+        }
 
     private val language: String
         get() = prefs().getString(Prefs.KEY_LANGUAGE, "auto") ?: "auto"
@@ -180,6 +192,7 @@ class VoiceImeService : InputMethodService() {
         val context = applicationContext
         // 每次录音读取最新调试参数
         debug = DebugParams.read(this)
+        emotionEvent = prefs().getBoolean(Prefs.KEY_EMOTION_EVENT, false)
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
         ) {
@@ -191,20 +204,16 @@ class VoiceImeService : InputMethodService() {
             return
         }
 
-        val variant = modelVariant
-        val modelDir = VoiceModelManager.resolveModelDir(context, variant)
+        val spec = modelSpec
+        val modelDir = VoiceModelManager.resolveModelDir(context, spec)
         if (modelDir == null) {
+            AppLog.i("VoiceIme", "模型缺失，自动下载: ${spec.id}")
             setStatus(getString(R.string.status_downloading))
             scope.launch {
-                val ok = VoiceModelManager.downloadModel(context, variant, null)
+                val custom = prefs().getString(Prefs.customUrlKey(spec.id), null)
+                val ok = VoiceModelManager.downloadModel(context, spec, custom)
                 setStatus(getString(if (ok) R.string.status_model_ready else R.string.status_download_failed))
             }
-            return
-        }
-
-        val modelFile = VoiceModelManager.selectModelFile(modelDir, variant)
-        if (!modelFile.exists()) {
-            setStatus(getString(R.string.status_model_missing))
             return
         }
 
@@ -212,9 +221,10 @@ class VoiceImeService : InputMethodService() {
         recordJob?.cancel()
         recording = true
         sessionStartMs = SystemClock.elapsedRealtime()
-        sessionModelPath = modelFile.absolutePath
-        sessionTokensPath = File(modelDir, "tokens.txt").absolutePath
-        sessionRecognizerKey = sessionModelPath + "|" + sessionTokensPath + "|" + language + "|" + debug.decodeThreads.coerceIn(1, 8)
+        AppLog.i("VoiceIme", "开始录音会话 #$mySession，模型: ${spec.id}，目录: ${modelDir.absolutePath}")
+        sessionModelDir = modelDir
+        sessionModelId = spec.id
+        sessionRecognizerKey = spec.id + "|" + modelDir.absolutePath + "|" + language + "|" + debug.decodeThreads.coerceIn(1, 8)
         resetSessionState()
         initVad()
         setStatus(getString(R.string.status_recording))
@@ -230,7 +240,12 @@ class VoiceImeService : InputMethodService() {
                 if (pcm.isEmpty() || session != mySession) return@launch
                 withContext(Dispatchers.Main) { setStatus(getString(R.string.status_recognizing)) }
                 val samples = pcmToFloatArray(pcm)
-                val text = decode(samples)
+                val result = decode(samples)
+                val text = if (emotionEvent && result.text.isNotBlank()) {
+                    result.text + EmotionEvent.format(result.emotion, result.event)
+                } else {
+                    result.text
+                }
                 withContext(Dispatchers.Main) {
                     if (session != mySession) return@withContext
                     if (text.isNotBlank()) {
@@ -240,16 +255,23 @@ class VoiceImeService : InputMethodService() {
                     }
                 }
             } catch (t: Throwable) {
-                Log.e(TAG, "Local voice input failed", t)
+                AppLog.e(TAG, "语音识别失败: " + (t.message ?: t.javaClass.simpleName))
                 withContext(Dispatchers.Main) { setStatus(t.message ?: "error") }
             } finally {
                 if (session == mySession) {
                     recording = false
-                    micButton?.text = getString(R.string.btn_start)
-                    micButton?.setBackgroundResource(R.drawable.btn_mic_bg)
-                    levelView?.setRecording(false)
                     resetSessionState()
                     releaseVad()
+                    // UI 更新必须回到主线程：ValueAnimator 只能在 Looper 线程操作。
+                    // 协程被取消时 withContext 会直接抛 CancellationException，
+                    // 因此用独立的 Main 协程确保收尾 UI 一定执行。
+                    scope.launch(Dispatchers.Main) {
+                        if (session == mySession) {
+                            micButton?.text = getString(R.string.btn_start)
+                            micButton?.setBackgroundResource(R.drawable.btn_mic_bg)
+                            levelView?.setRecording(false)
+                        }
+                    }
                 }
             }
         }
@@ -261,7 +283,13 @@ class VoiceImeService : InputMethodService() {
     }
 
     private fun commit(text: String) {
-        currentInputConnection?.commitText(text, 1)
+        try {
+            currentInputConnection?.commitText(text, 1)
+        } catch (t: Throwable) {
+            // 输入连接可能已失效（如输入法窗口正在关闭），不影响后续状态
+            Log.w(TAG, "commitText failed", t)
+        }
+        AppLog.i(TAG, "识别上屏: " + text.take(60))
         setStatus(getString(R.string.status_done))
         if (autoSwitchBack) switchBackToPreviousIme()
     }
@@ -270,7 +298,14 @@ class VoiceImeService : InputMethodService() {
     private fun switchBackToPreviousIme() {
         try {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.switchToLastInputMethod(window.window!!.attributes.token)
+            // 仅启用一个输入法时没有"上一个"可切，直接切换会把键盘收起
+            if (imm.enabledInputMethodList.size <= 1) {
+                Log.i(TAG, "Only one IME enabled, skip switch back")
+                return
+            }
+            val token = window?.window?.attributes?.token ?: return
+            val ok = imm.switchToLastInputMethod(token)
+            Log.i(TAG, "switchToLastInputMethod -> $ok")
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to switch back to previous IME", t)
         }
@@ -508,16 +543,18 @@ class VoiceImeService : InputMethodService() {
      * 解码：不串行（与官方 Demo 一致，同一识别器可并发解码多个语音段）。
      * 识别器创建/重建用 recognizerLock 保护；重建时旧实例延迟释放，避免 JNI use-after-free。
      */
-    private fun decode(samples: FloatArray): String {
+    private fun decode(samples: FloatArray): DecodeResult {
         val key = sessionRecognizerKey
         val rec = synchronized(recognizerLock) {
             if (recognizerKey == key && recognizer != null) {
                 recognizer
             } else {
+                val modelDir = sessionModelDir ?: return DecodeResult("")
+                val spec = AsrModels.byId(sessionModelId) ?: return DecodeResult("")
                 val old = recognizer
-                SenseVoiceRecognizer(
-                    modelPath = sessionModelPath,
-                    tokensPath = sessionTokensPath,
+                VoiceRecognizer(
+                    modelDir = modelDir,
+                    spec = spec,
                     language = language,
                     useItn = true,
                     numThreads = debug.decodeThreads.coerceIn(1, 8),
@@ -529,7 +566,7 @@ class VoiceImeService : InputMethodService() {
                     new
                 }
             }
-        } ?: return ""
+        } ?: return DecodeResult("")
         inflightDecodes.incrementAndGet()
         try {
             return rec.decode(samples, SAMPLE_RATE)
@@ -538,17 +575,24 @@ class VoiceImeService : InputMethodService() {
         }
     }
 
+    /** 流式预览只需文本（情感/事件标签只在整段上屏时附加） */
+    private fun decodeText(samples: FloatArray): String = decode(samples).text
+
     /** 旧识别器延迟释放：等所有在途解码结束后再 release */
-    private fun releaseLater(old: SenseVoiceRecognizer) {
+    private fun releaseLater(old: VoiceRecognizer) {
         if (inflightDecodes.get() == 0) {
             old.release()
             return
         }
         scope.launch(Dispatchers.IO) {
-            while (inflightDecodes.get() > 0 && scope.isActive) {
-                delay(50)
+            try {
+                while (inflightDecodes.get() > 0 && scope.isActive) {
+                    delay(50)
+                }
+                old.release()
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to release old recognizer", t)
             }
-            old.release()
         }
     }
 
