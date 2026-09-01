@@ -47,6 +47,20 @@
     <string name="btn_start_use">我知道了，开始使用</string>
 
     <string name="status_ok">✓ 正常</string>
+    <string name="status_fail">✗</string>
+    <string name="lang_button_prefix">🌐 </string>
+    <string name="notifier_channel_name">模型下载</string>
+    <string name="notifier_channel_desc">语音模型下载进度</string>
+    <string name="notifier_downloading">正在下载 %1$s</string>
+    <string name="notifier_preparing">准备下载 %1$s</string>
+    <string name="notifier_extracting">正在解压…</string>
+    <string name="notifier_extracting_bzip2">正在解压（bzip2 较慢，请稍候…）</string>
+    <string name="notifier_done_title">下载完成</string>
+    <string name="notifier_done_body">%1$s 已就绪</string>
+    <string name="notifier_failed_title">下载失败</string>
+    <string name="notifier_failed_body">%1$s：%2$s</string>
+    <string name="dbg_err_number">%1$s 需为数字</string>
+    <string name="dbg_err_range">%1$s 需在 %2$s~%3$s 之间</string>
     <string name="status_ime_enabled">输入法已在系统中启用</string>
     <string name="status_ime_disabled">输入法尚未在系统中启用</string>
     <string name="status_mic_ok">麦克风权限已授予</string>

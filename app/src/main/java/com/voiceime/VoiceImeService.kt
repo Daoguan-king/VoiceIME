@@ -24,13 +24,12 @@ import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,8 +64,8 @@ class VoiceImeService : InputMethodService() {
     /** 识别器创建/重建锁（解码本身不锁，支持并发解码） */
     private val recognizerLock = Any()
 
-    /** 在途解码数：识别器重建时延迟释放旧实例，避免 JNI use-after-free */
-    private val inflightDecodes = AtomicInteger(0)
+    // 在途解码计数已下沉到 VoiceRecognizer 实例级（inflightCount），
+    // 避免全局计数造成的误释放竞态与跨实例相互拖延
 
     /** 调试参数（每次录音开始时从设置读取） */
     private var debug = DebugParams.Values()
@@ -325,7 +324,7 @@ class VoiceImeService : InputMethodService() {
         val values = resources.getStringArray(R.array.language_values)
         val labels = resources.getStringArray(R.array.language_labels)
         val idx = values.indexOf(language).coerceAtLeast(0)
-        langButton?.text = "🌐 " + labels[idx]
+        langButton?.text = getString(R.string.lang_button_prefix) + labels[idx]
     }
 
     // ---------------- VAD 与流式入口 ----------------
@@ -546,7 +545,7 @@ class VoiceImeService : InputMethodService() {
     private fun decode(samples: FloatArray): DecodeResult {
         val key = sessionRecognizerKey
         val rec = synchronized(recognizerLock) {
-            if (recognizerKey == key && recognizer != null) {
+            val current = if (recognizerKey == key && recognizer != null) {
                 recognizer
             } else {
                 val modelDir = sessionModelDir ?: return DecodeResult("")
@@ -562,37 +561,54 @@ class VoiceImeService : InputMethodService() {
                     recognizer = it
                     recognizerKey = key
                 }.let { new ->
+                    // 锁内调用 releaseLater：此时本线程尚未登记在途解码，
+                    // 但 releaseLater 只检查 old 实例自己的计数，不会误释放 new
                     old?.let { releaseLater(it) }
                     new
                 }
             }
+            // 关键：在锁内登记在途解码，避免 releaseLater 看到计数为 0 而提前 release
+            current?.beginDecode()
+            current
         } ?: return DecodeResult("")
-        inflightDecodes.incrementAndGet()
         try {
             return rec.decode(samples, SAMPLE_RATE)
         } finally {
-            inflightDecodes.decrementAndGet()
+            rec.endDecode()
         }
     }
 
     /** 流式预览只需文本（情感/事件标签只在整段上屏时附加） */
     private fun decodeText(samples: FloatArray): String = decode(samples).text
 
-    /** 旧识别器延迟释放：等所有在途解码结束后再 release */
+    /** 旧识别器延迟释放：等它自己实例的在途解码全部结束后再 release（须在锁内调用） */
     private fun releaseLater(old: VoiceRecognizer) {
-        if (inflightDecodes.get() == 0) {
+        if (old.inflightCount() == 0) {
             old.release()
             return
         }
-        scope.launch(Dispatchers.IO) {
+        // 用独立守护线程等待，不随 scope 取消——否则 Service 销毁/切换模型时
+        // 协程被取消，旧识别器永不释放（原生内存泄漏）
+        Thread {
             try {
-                while (inflightDecodes.get() > 0 && scope.isActive) {
-                    delay(50)
+                while (old.inflightCount() > 0) {
+                    Thread.sleep(50)
                 }
                 old.release()
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to release old recognizer", t)
             }
+        }.apply { isDaemon = true }.start()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.cancel()
+        // 释放当前识别器（若有在途解码则等待其结束，避免 JNI use-after-free）
+        synchronized(recognizerLock) {
+            recognizer?.let { releaseLater(it) }
+            recognizer = null
+            recognizerKey = ""
         }
     }
 

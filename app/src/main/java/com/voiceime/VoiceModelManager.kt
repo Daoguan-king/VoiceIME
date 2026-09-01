@@ -124,7 +124,7 @@ object VoiceModelManager {
                 return@withContext true
             }
             AppLog.i(TAG, "开始下载模型: ${spec.id}（自定义源: ${customUrl ?: "无"}）")
-            DownloadNotifier.progress(context, spec, 0, 0, "准备下载 " + spec.label)
+            DownloadNotifier.progress(context, spec, 0, 0, context.getString(R.string.notifier_preparing, spec.label))
 
             if (!hasEnoughSpace(context, spec.requiredBytes)) {
                 val msg = "磁盘空间不足（需要约 " + (spec.requiredBytes / 1048576) + " MB）"
@@ -172,7 +172,7 @@ object VoiceModelManager {
                 DownloadNotifier.progress(context, spec, done, total)
             }
             if (!ok) return false
-            DownloadNotifier.progress(context, spec, 0, 0, extractHint(archive))
+            DownloadNotifier.progress(context, spec, 0, 0, extractHint(context, archive))
             extractArchive(archive, root)
             archive.delete()
             if (isModelReady(root, spec)) {
@@ -222,27 +222,9 @@ object VoiceModelManager {
     }
 
     /** 根据压缩包格式返回解压提示文案（bzip2 慢，明确告知） */
-    private fun extractHint(archive: File): String {
-        val header = archive.inputStream().buffered().use { ins ->
-            val buf = ByteArray(262)
-            var off = 0
-            while (off < buf.size) {
-                val n = ins.read(buf, off, buf.size - off)
-                if (n < 0) break
-                off += n
-            }
-            buf
-        }
-        val isBzip2 = header.size >= 3 && header[0] == 'B'.code.toByte() &&
-            header[1] == 'Z'.code.toByte() && header[2] == 'h'.code.toByte()
-        val isZip = header.size >= 2 && header[0] == 'P'.code.toByte() && header[1] == 'K'.code.toByte()
-        return if (isBzip2) {
-            "正在解压（bzip2 较慢，请稍候…）"
-        } else if (isZip) {
-            "正在解压…"
-        } else {
-            "正在解压…"
-        }
+    private fun extractHint(context: Context, archive: File): String = when (sniffFormat(archive)) {
+        ArchiveFormat.BZIP2 -> context.getString(R.string.notifier_extracting_bzip2)
+        else -> context.getString(R.string.notifier_extracting)
     }
 
     // ---------------- 压缩包解压 ----------------
@@ -265,7 +247,35 @@ object VoiceModelManager {
         }
     }
 
-    private fun extractAll(archive: File, tmp: File): List<String> {
+    private fun extractAll(archive: File, tmp: File): List<String> = when (sniffFormat(archive)) {
+        ArchiveFormat.ZIP -> {
+            val rels = mutableListOf<String>()
+            ZipInputStream(archive.inputStream().buffered()).use { zis ->
+                var e = zis.nextEntry
+                while (e != null) {
+                    if (!e.isDirectory) {
+                        val rel = sanitizeRel(e.name)
+                        if (rel != null && isWantedFile(rel)) {
+                            writeEntry(zis, File(tmp, rel))
+                            rels.add(rel)
+                        }
+                    }
+                    zis.closeEntry()
+                    e = zis.nextEntry
+                }
+            }
+            rels
+        }
+        ArchiveFormat.BZIP2 -> extractTar(archive, tmp, TarCompression.BZIP2)
+        ArchiveFormat.GZIP -> extractTar(archive, tmp, TarCompression.GZIP)
+        ArchiveFormat.TAR -> extractTar(archive, tmp, TarCompression.NONE)
+        ArchiveFormat.UNKNOWN -> throw IOException("不支持的压缩包格式: ${archive.name}")
+    }
+
+    /** 压缩包格式：根据文件头魔数识别（zip / bzip2 / gzip / 裸 tar） */
+    private enum class ArchiveFormat { ZIP, BZIP2, GZIP, TAR, UNKNOWN }
+
+    private fun sniffFormat(archive: File): ArchiveFormat {
         val header = archive.inputStream().buffered().use { ins ->
             val buf = ByteArray(262)
             var off = 0
@@ -282,28 +292,11 @@ object VoiceModelManager {
         val isGzip = header.size >= 2 && header[0] == 0x1F.toByte() && header[1] == 0x8B.toByte()
         val isTar = header.size >= 262 && String(header, 257, 5) == "ustar"
         return when {
-            isZip -> {
-                val rels = mutableListOf<String>()
-                ZipInputStream(archive.inputStream().buffered()).use { zis ->
-                    var e = zis.nextEntry
-                    while (e != null) {
-                        if (!e.isDirectory) {
-                            val rel = sanitizeRel(e.name)
-                            if (rel != null && isWantedFile(rel)) {
-                                writeEntry(zis, File(tmp, rel))
-                                rels.add(rel)
-                            }
-                        }
-                        zis.closeEntry()
-                        e = zis.nextEntry
-                    }
-                }
-                rels
-            }
-            isBzip2 -> extractTar(archive, tmp, TarCompression.BZIP2)
-            isGzip -> extractTar(archive, tmp, TarCompression.GZIP)
-            isTar -> extractTar(archive, tmp, TarCompression.NONE)
-            else -> throw IOException("不支持的压缩包格式: ${archive.name}")
+            isZip -> ArchiveFormat.ZIP
+            isBzip2 -> ArchiveFormat.BZIP2
+            isGzip -> ArchiveFormat.GZIP
+            isTar -> ArchiveFormat.TAR
+            else -> ArchiveFormat.UNKNOWN
         }
     }
 

@@ -25,4 +25,9 @@
 
     <!-- 电平条 -->
     <color name="level_bar">#8A5CF6</color>
+
+    <!-- 状态文字 -->
+    <color name="status_ok">#2E7D32</color>
+    <color name="status_fail">#C62828</color>
+    <color name="text_hint_gray">#888888</color>
 </resources>
