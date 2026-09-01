@@ -1,6 +1,8 @@
 <h1 align="center">VoiceIME · Local Voice Input IME for Trime</h1>
 
-<p align="center">English · <a href="README.md">简体中文</a></p>
+<p align="center">
+    <a href="README.md">简体中文</a>
+</p>
 
 <p align="center">A <b>fully offline local voice input IME</b> powered by <a href="https://github.com/k2-fsa/sherpa-onnx">sherpa-onnx</a>.
 It registers an <code>imeSubtypeMode="voice"</code> subtype so Trime (同文输入法) can switch to it with the voice key.</p>
