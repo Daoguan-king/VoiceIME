@@ -1,6 +1,8 @@
 <h1 align="center">VoiceIME · 供 Trime 调用的本地语音输入法</h1>
 
-<p align="center">[English](README_EN.md) · 简体中文</p>
+<p align="center">
+    <a href="README_EN.md">English</a>
+</p>
 
 <p align="center">一款基于 <a href="https://github.com/k2-fsa/sherpa-onnx">sherpa-onnx</a> 的 <b>本地离线语音输入法</b>，
 通过注册 <code>imeSubtypeMode="voice"</code> 子类型，让同文输入法（Trime）按下语音键即可切换使用。</p>
