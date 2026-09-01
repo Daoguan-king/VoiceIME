@@ -21,7 +21,7 @@
     <string name="main_title">VoiceIME（SenseVoice local voice input）</string>
     <string name="main_desc">Local voice input IME for Trime. Install &amp; enable this IME in system settings, then press Trime\'s voice key (VOICE_ASSIST) to switch here.</string>
     <string name="btn_permission">Grant microphone permission</string>
-    <string name="btn_download">Download SenseVoice model</string>
+    <string name="btn_download">Download model</string>
     <string name="label_auto_switch">Auto switch back to previous IME after commit</string>
     <string name="label_model_dir">Model directory</string>
     <string name="toast_granted">Microphone granted</string>
@@ -41,7 +41,7 @@
     <string name="btn_grant_mic">Grant permission</string>
     <string name="step_model_title">3. Download the SenseVoice model</string>
     <string name="step_model_desc">About 170 MB for the int8 model, stored in the app private directory.</string>
-    <string name="btn_download_model">Download model (int8, ~170 MB)</string>
+    <string name="btn_download_model">Download model</string>
     <string name="step_trime_title">4. Configure Trime (同文输入法)</string>
     <string name="step_trime_desc">In Trime: Settings → General → Preferred voice input → select VoiceIME. Then press the voice key on the keyboard (usually long-press space or the ✾ key, bound to VOICE_ASSIST in your theme).</string>
     <string name="btn_start_use">Got it, start using</string>
@@ -56,7 +56,28 @@
 
     <!-- 模型与语言选择 -->
     <string name="label_variant">SenseVoice model</string>
+    <string name="label_model">ASR model</string>
     <string name="label_language">Recognition language</string>
+    <string name="label_custom_url">Custom download source (optional)</string>
+    <string name="custom_url_hint">Direct link to zip / tar.bz2 / tar.gz. Falls back to the official source on failure.</string>
+    <string name="btn_save_custom_url">Save source</string>
+    <string name="btn_clear_custom_url">Clear</string>
+    <string name="toast_custom_url_saved">Custom source saved</string>
+    <string name="toast_custom_url_cleared">Custom source cleared</string>
+    <string name="label_emotion_event">Emotion / sound-event tags (SenseVoice rich transcription)</string>
+    <string name="btn_logs">Logs</string>
+    <string name="btn_delete_model">Delete model</string>
+    <string name="delete_confirm_title">Delete model</string>
+    <string name="delete_confirm_msg">Delete %1$s? The downloaded files will be removed to free up space.</string>
+    <string name="delete_confirm_ok">Delete</string>
+    <string name="toast_model_not_downloaded">Model not downloaded</string>
+    <string name="toast_model_deleted">Model deleted</string>
+    <string name="toast_model_delete_failed">Delete failed</string>
+    <string name="logs_title">App log</string>
+    <string name="logs_clear">Clear</string>
+    <string name="logs_close">Close</string>
+    <string name="logs_empty">(no log entries)</string>
+    <string name="logs_cleared">Log cleared</string>
     <string-array name="model_variant_labels">
         <item>Small (int8, ~170 MB, recommended)</item>
         <item>Small (fp32, ~900 MB)</item>

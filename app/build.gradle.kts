@@ -6,6 +6,22 @@ plugins {
     id("com.android.application")
 }
 
+// ---------------- ABI 构建选择 ----------------
+// 用法：./gradlew :app:assembleDebug -Pabi=universal
+// 可选值：arm64-v8a（默认）/ armeabi-v7a（v7a）/ x86 / x86_64 / universal（all，四 ABI 全打）
+val abiArg = ((project.findProperty("abi") as? String) ?: "arm64-v8a").trim().lowercase()
+val buildAbis: List<String> = when (abiArg) {
+    "arm64-v8a", "arm64", "aarch64" -> listOf("arm64-v8a")
+    "armeabi-v7a", "v7a", "arm32" -> listOf("armeabi-v7a")
+    "x86" -> listOf("x86")
+    "x86_64", "x64", "amd64" -> listOf("x86_64")
+    "universal", "all" -> listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+    else -> throw GradleException(
+        "未知 ABI: '$abiArg'，可选：arm64-v8a / armeabi-v7a / x86 / x86_64 / universal",
+    )
+}
+println("VoiceIME: 本次构建 ABI = $buildAbis（-Pabi=$abiArg）")
+
 android {
     namespace = "com.voiceime"
     compileSdk = 36
@@ -14,12 +30,13 @@ android {
         applicationId = "com.voiceime"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
 
-        // 只打包 arm64-v8a 以减小体积；老 32 位设备请改为 armeabi-v7a 或两个都加
+        // ABI 选择（命令行传入 -Pabi=...，默认 arm64-v8a）：
+        //   arm64-v8a | armeabi-v7a(v7a) | x86 | x86_64 | universal(全部)
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += buildAbis
         }
     }
 
@@ -51,4 +68,6 @@ dependencies {
     // sherpa-onnx Kotlin API + JNI + onnxruntime（四 ABI，见 app/libs）
     implementation(files("libs/sherpa-onnx-1.13.4.aar"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // 模型压缩包解压（zip / tar.bz2 / tar.gz）
+    implementation("org.apache.commons:commons-compress:1.27.1")
 }

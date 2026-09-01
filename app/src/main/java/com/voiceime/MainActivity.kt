@@ -5,8 +5,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -28,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * VoiceIME 设置页：
@@ -38,15 +41,18 @@ class MainActivity : Activity() {
 
     companion object {
         private const val PREF_ONBOARDING_DONE = "onboarding_done"
+        private const val REQ_NOTIFICATION = 0x5A52
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs by lazy { getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE) }
 
     private var statusView: TextView? = null
+    private var emotionCheck: CheckBox? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.init(this)
         if (prefs.getBoolean(PREF_ONBOARDING_DONE, false)) {
             setContentView(buildMainUi())
         } else {
@@ -105,13 +111,12 @@ class MainActivity : Activity() {
         })
 
         // 3. 模型下载
-        val variant = currentVariant()
-        val modelReady = VoiceModelManager.resolveModelDir(this, variant) != null
+        val modelReady = VoiceModelManager.resolveModelDir(this, currentModelSpec()) != null
         content.addView(sectionTitle(getString(R.string.step_model_title)))
         content.addView(sectionDesc(getString(R.string.step_model_desc)))
         content.addView(statusLine(modelReady, R.string.status_model_ok, R.string.status_model_missing_short))
         content.addView(actionButton(getString(R.string.btn_download_model)) {
-            startModelDownload(variant)
+            startModelDownload(currentModel())
         })
 
         // 4. 同文配置说明
@@ -153,27 +158,29 @@ class MainActivity : Activity() {
         }
         content.addView(statusView)
 
-        // 模型变体
-        content.addView(sectionTitle(getString(R.string.label_variant)))
-        val variantSpinner = Spinner(this)
-        val variantValues = resources.getStringArray(R.array.model_variant_values)
-        variantSpinner.adapter = ArrayAdapter(
+        // ASR 模型（两段式：第一段选类型，第二段选具体模型）
+        content.addView(sectionTitle(getString(R.string.label_model)))
+        val families = ModelFamily.entries
+        val familySpinner = Spinner(this)
+        familySpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
-            resources.getStringArray(R.array.model_variant_labels),
+            families.map { it.label },
         ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-        variantSpinner.setSelection(variantValues.indexOf(currentVariant()).coerceAtLeast(0))
-        variantSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                prefs.edit().putString(Prefs.KEY_MODEL_VARIANT, variantValues[position]).apply()
-                refreshStatus()
-            }
+        familySpinner.setPadding(0, dp(2), 0, dp(6))
+        content.addView(familySpinner)
 
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        val modelSpinner = Spinner(this)
+        modelSpinner.setPadding(0, dp(6), 0, dp(2))
+        content.addView(modelSpinner)
+        val modelDescView = TextView(this).apply {
+            textSize = 12f
+            setTextColor(getColor(R.color.text_desc))
+            setPadding(0, dp(4), 0, dp(8))
         }
-        content.addView(variantSpinner)
+        content.addView(modelDescView)
 
-        // 识别语言
+        // 识别语言（仅支持语言选择的模型可用）
         content.addView(sectionTitle(getString(R.string.label_language)))
         val languageSpinner = Spinner(this)
         val languageValues = resources.getStringArray(R.array.language_values)
@@ -182,7 +189,119 @@ class MainActivity : Activity() {
             android.R.layout.simple_spinner_item,
             resources.getStringArray(R.array.language_labels),
         ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        content.addView(languageSpinner)
+
+        // 自定义下载源（可选，zip / tar.bz2 / tar.gz 直链；每个模型独立保存）
+        content.addView(sectionTitle(getString(R.string.label_custom_url)))
+        val urlEdit = EditText(this).apply {
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            hint = getString(R.string.custom_url_hint)
+            setSingleLine(true)
+        }
+        content.addView(urlEdit)
+        val urlRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(4), 0, 0)
+        }
+        urlRow.addView(Button(this).apply {
+            text = getString(R.string.btn_save_custom_url)
+            setOnClickListener {
+                prefs.edit()
+                    .putString(Prefs.customUrlKey(currentModel()), urlEdit.text.toString().trim())
+                    .apply()
+                Toast.makeText(this@MainActivity, R.string.toast_custom_url_saved, Toast.LENGTH_SHORT).show()
+            }
+        })
+        urlRow.addView(Button(this).apply {
+            text = getString(R.string.btn_clear_custom_url)
+            setOnClickListener {
+                prefs.edit().putString(Prefs.customUrlKey(currentModel()), null).apply()
+                urlEdit.setText("")
+                Toast.makeText(this@MainActivity, R.string.toast_custom_url_cleared, Toast.LENGTH_SHORT).show()
+            }
+        })
+        content.addView(urlRow)
+
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        actionRow.addView(actionButton(getString(R.string.btn_download)) {
+            startModelDownload(currentModel())
+        })
+        actionRow.addView(actionButton(getString(R.string.btn_logs)) {
+            showLogsDialog()
+        })
+        actionRow.addView(actionButton(getString(R.string.btn_delete_model)) {
+            confirmDeleteModel()
+        })
+        content.addView(actionRow)
+
+        // ---- 两段式联动逻辑 ----
+        // 注意：family 以 Spinner 当前选中为准，绝不能从 prefs 推导——
+        // prefs 保存的是"上一个模型"，会导致第二段永远重建为旧类型。
+
+        /** 第一段当前选中的类型 */
+        fun selectedFamily(): ModelFamily =
+            families.getOrNull(familySpinner.selectedItemPosition) ?: ModelFamily.SENSE_VOICE
+
+        /** 按第一段当前类型重建第二段下拉，并选中指定模型（null 选第一个） */
+        fun rebuildModelSpinner(selectId: String?) {
+            val specs = AsrModels.byFamily(selectedFamily())
+            modelSpinner.adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                specs.map { it.label },
+            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            modelSpinner.setSelection(specs.indexOfFirst { it.id == selectId }.coerceAtLeast(0))
+        }
+
+        /** 应用当前模型选择：保存、刷新介绍/语言/情感/自定义源 */
+        fun applyModelSelection() {
+            val specs = AsrModels.byFamily(selectedFamily())
+            val spec = specs.getOrNull(modelSpinner.selectedItemPosition)
+                ?: specs.firstOrNull()
+                ?: return
+            prefs.edit().putString(Prefs.KEY_MODEL, spec.id).apply()
+            refreshStatus()
+            updateLanguageState(languageSpinner)
+            urlEdit.setText(prefs.getString(Prefs.customUrlKey(spec.id), null).orEmpty())
+            modelDescView.text = spec.summary
+            emotionCheck?.let { updateEmotionState(it) }
+        }
+
+        // 首次布局回调保护：Spinner 挂上监听后会自动回调一次 onItemSelected，
+        // 此时不能重建第二段（否则会丢掉初始化选中的具体模型）
+        var spinnerInitialized = false
+
+        // 初始化选择与监听（先 setSelection 再挂监听，避免初始化时触发保存）
+        val current = currentModelSpec()
+        familySpinner.setSelection(families.indexOf(current.family).coerceAtLeast(0))
+        rebuildModelSpinner(current.id)
         languageSpinner.setSelection(languageValues.indexOf(currentLanguage()).coerceAtLeast(0))
+        urlEdit.setText(prefs.getString(Prefs.customUrlKey(current.id), null).orEmpty())
+        modelDescView.text = current.summary
+        updateLanguageState(languageSpinner)
+        emotionCheck?.let { updateEmotionState(it) }
+        familySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!spinnerInitialized) {
+                    // 布局阶段的自动回调：初始化已完成，保持当前模型选择
+                    spinnerInitialized = true
+                    return
+                }
+                rebuildModelSpinner(null)
+                applyModelSelection()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        modelSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                applyModelSelection()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
         languageSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 prefs.edit().putString(Prefs.KEY_LANGUAGE, languageValues[position]).apply()
@@ -190,11 +309,15 @@ class MainActivity : Activity() {
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
-        content.addView(languageSpinner)
 
-        content.addView(actionButton(getString(R.string.btn_download)) {
-            startModelDownload(currentVariant())
-        })
+        emotionCheck = CheckBox(this).apply {
+            text = getString(R.string.label_emotion_event)
+            isChecked = prefs.getBoolean(Prefs.KEY_EMOTION_EVENT, false)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean(Prefs.KEY_EMOTION_EVENT, checked).apply()
+            }
+        }
+        content.addView(emotionCheck)
 
         content.addView(CheckBox(this).apply {
             text = getString(R.string.label_auto_switch)
@@ -294,8 +417,8 @@ class MainActivity : Activity() {
 
     private fun refreshStatus() {
         val view = statusView ?: return
-        val variant = currentVariant()
-        val ready = VoiceModelManager.resolveModelDir(this, variant) != null
+        val spec = currentModelSpec()
+        val ready = VoiceModelManager.resolveModelDir(this, spec) != null
         val sb = StringBuilder()
         sb.append(if (isImeEnabled()) getString(R.string.status_ime_enabled)
         else getString(R.string.status_ime_disabled))
@@ -303,19 +426,60 @@ class MainActivity : Activity() {
         sb.append(if (hasMicPermission()) getString(R.string.status_mic_ok)
         else getString(R.string.status_mic_missing))
         sb.append(System.lineSeparator())
-        sb.append(getString(R.string.label_variant)).append(": ").append(variant)
+        sb.append(getString(R.string.label_model)).append(": ").append(spec.label)
         sb.append("  ").append(if (ready) getString(R.string.status_model_ok)
         else getString(R.string.status_model_missing_short))
         view.text = sb.toString()
     }
 
-    private fun startModelDownload(variant: String) {
+    /** 下载当前模型：优先使用该模型保存的自定义源，失败自动回退官方源/HF 镜像 */
+    /** 删除当前模型：确认后清理文件（IO 后台执行） */
+    private fun confirmDeleteModel() {
+        val spec = currentModelSpec()
+        val ready = VoiceModelManager.resolveModelDir(this, spec) != null
+        if (!ready) {
+            toast(R.string.toast_model_not_downloaded)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.delete_confirm_title)
+            .setMessage(getString(R.string.delete_confirm_msg, spec.label))
+            .setPositiveButton(R.string.delete_confirm_ok) { _, _ ->
+                scope.launch(Dispatchers.IO) {
+                    val ok = VoiceModelManager.deleteModel(this@MainActivity, spec)
+                    withContext(Dispatchers.Main) {
+                        toast(if (ok) R.string.toast_model_deleted else R.string.toast_model_delete_failed)
+                        refreshStatus()
+                    }
+                }
+            }
+            .setNegativeButton(R.string.logs_close, null)
+            .show()
+    }
+
+    private fun startModelDownload(modelId: String) {
+        val spec = AsrModels.require(modelId)
+        val custom = prefs.getString(Prefs.customUrlKey(modelId), null)
+        ensureNotificationPermission()
         toast(R.string.toast_download_started)
         scope.launch {
-            val ok = VoiceModelManager.downloadModel(this@MainActivity, variant, null)
+            val ok = VoiceModelManager.downloadModel(this@MainActivity, spec, custom)
             toast(if (ok) R.string.toast_download_done else R.string.toast_download_failed)
             refreshStatus()
         }
+    }
+
+    private fun updateLanguageState(spinner: Spinner) {
+        val enabled = currentModelSpec().supportsLanguage
+        spinner.isEnabled = enabled
+        spinner.alpha = if (enabled) 1f else 0.4f
+    }
+
+    /** 情感/事件检测仅 SenseVoice 支持 */
+    private fun updateEmotionState(check: CheckBox) {
+        val enabled = currentModelSpec().kind == ModelKind.SENSE_VOICE
+        check.isEnabled = enabled
+        check.alpha = if (enabled) 1f else 0.4f
     }
 
     private fun isImeEnabled(): Boolean {
@@ -326,9 +490,15 @@ class MainActivity : Activity() {
     private fun hasMicPermission(): Boolean =
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
-    private fun currentVariant(): String =
-        prefs.getString(Prefs.KEY_MODEL_VARIANT, VoiceModelManager.VARIANT_INT8)
-            ?: VoiceModelManager.VARIANT_INT8
+    /** 当前模型 id：新键优先，旧 KEY_MODEL_VARIANT 自动迁移 */
+    private fun currentModel(): String {
+        val sp = prefs
+        return AsrModels.byId(sp.getString(Prefs.KEY_MODEL, null))?.id
+            ?: AsrModels.byLegacyVariant(sp.getString(Prefs.KEY_MODEL_VARIANT, null))?.id
+            ?: AsrModels.DEFAULT_ID
+    }
+
+    private fun currentModelSpec(): ModelSpec = AsrModels.require(currentModel())
 
     private fun currentLanguage(): String =
         prefs.getString(Prefs.KEY_LANGUAGE, "auto") ?: "auto"
@@ -362,6 +532,42 @@ class MainActivity : Activity() {
 
     private fun toast(resId: Int) {
         Toast.makeText(this, resId, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Android 13+ 请求通知权限（下载进度条用；拒绝不影响下载） */
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATION)
+        }
+    }
+
+    /** 应用内日志弹窗（含下载失败原因） */
+    private fun showLogsDialog() {
+        val entries = AppLog.snapshot()
+        val body = TextView(this).apply {
+            text = if (entries.isEmpty()) {
+                getString(R.string.logs_empty)
+            } else {
+                entries.joinToString("\n")
+            }
+            textSize = 11f
+            setTypeface(Typeface.MONOSPACE)
+            setTextIsSelectable(true)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        val scroll = ScrollView(this).apply { addView(body) }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.logs_title)
+            .setView(scroll)
+            .setPositiveButton(R.string.logs_clear) { _, _ ->
+                AppLog.clear()
+                toast(R.string.logs_cleared)
+            }
+            .setNegativeButton(R.string.logs_close, null)
+            .show()
     }
 
     override fun onDestroy() {
