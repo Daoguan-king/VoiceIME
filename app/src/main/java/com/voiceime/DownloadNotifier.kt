@@ -18,7 +18,11 @@ object DownloadNotifier {
     private const val NOTIFICATION_ID = 1001
     private const val TAG = "DownloadNotifier"
 
+    @Volatile
     private var active = false
+
+    /** 上次进度通知时间（节流用，避免 1GB 模型触发数千次 notify） */
+    private var lastProgressAt = 0L
 
     private fun manager(context: Context): NotificationManager? =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -27,9 +31,9 @@ object DownloadNotifier {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "模型下载",
+                context.getString(R.string.notifier_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
-            ).apply { description = "语音模型下载进度" }
+            ).apply { description = context.getString(R.string.notifier_channel_desc) }
             nm.createNotificationChannel(channel)
         }
     }
@@ -47,7 +51,11 @@ object DownloadNotifier {
     /** 下载进行中：total<=0 时为不确定进度（如 HF 多文件） */
     fun progress(context: Context, spec: ModelSpec, downloaded: Long, total: Long, fileDesc: String = "") {
         active = true
-        val title = "正在下载 " + spec.label
+        val now = android.os.SystemClock.elapsedRealtime()
+        // 节流：两次通知至少间隔 300ms（1GB 模型若每 256KB 更新会有数千次 notify，被系统限流）
+        if (now - lastProgressAt < 300 && downloaded < total) return
+        lastProgressAt = now
+        val title = context.getString(R.string.notifier_downloading, spec.label)
         val text = if (fileDesc.isNotBlank()) {
             fileDesc
         } else {
@@ -65,17 +73,27 @@ object DownloadNotifier {
 
     fun done(context: Context, spec: ModelSpec) {
         active = false
+        lastProgressAt = 0L
         notify(
             context,
-            baseBuilder(context, "下载完成", spec.label + " 已就绪").setProgress(0, 0, false),
+            baseBuilder(
+                context,
+                context.getString(R.string.notifier_done_title),
+                context.getString(R.string.notifier_done_body, spec.label),
+            ).setProgress(0, 0, false),
         )
     }
 
     fun failed(context: Context, spec: ModelSpec, reason: String) {
         active = false
+        lastProgressAt = 0L
         notify(
             context,
-            baseBuilder(context, "下载失败", spec.label + "：" + reason).setProgress(0, 0, false),
+            baseBuilder(
+                context,
+                context.getString(R.string.notifier_failed_title),
+                context.getString(R.string.notifier_failed_body, spec.label, reason),
+            ).setProgress(0, 0, false),
         )
     }
 

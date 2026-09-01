@@ -15,10 +15,12 @@ import java.util.Locale
 object AppLog {
     private const val TAG = "VoiceIme"
     private const val MAX_ENTRIES = 400
+    private const val MAX_FILE_BYTES = 1024L * 1024L // 日志文件 1MB 轮转
 
     private val entries = ArrayDeque<String>()
     private var file: File? = null
-    private val fmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
+    // SimpleDateFormat 非线程安全：用 ThreadLocal 隔离（录音 IO 线程与主线程并发写日志）
+    private val fmt = ThreadLocal.withInitial { SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US) }
 
     fun init(context: Context) {
         if (file == null) {
@@ -39,19 +41,30 @@ object AppLog {
     }
 
     private fun log(level: Char, tag: String, msg: String) {
-        val line = fmt.format(Date()) + " " + level + " " + tag + ": " + msg
+        val line = fmt.get().format(Date()) + " " + level + " " + tag + ": " + msg
+        // 内存缓冲与文件写入在同一把锁内串行化，避免多线程交错
         synchronized(entries) {
             entries.addLast(line)
             while (entries.size > MAX_ENTRIES) entries.removeFirst()
+            writeFileLocked(line)
         }
         when (level) {
             'I' -> Log.i(tag, msg)
             'W' -> Log.w(tag, msg)
             else -> Log.e(tag, msg)
         }
+    }
+
+    /** 追加写文件（须在 synchronized(entries) 内调用）；超过 1MB 自动轮转 */
+    private fun writeFileLocked(line: String) {
         try {
             val f = file ?: return
             f.parentFile?.mkdirs()
+            if (f.exists() && f.length() > MAX_FILE_BYTES) {
+                val old = File(f.parentFile, "voiceime.log.old")
+                old.delete()
+                f.renameTo(old)
+            }
             f.appendText(line + "\n")
         } catch (_: Throwable) {
             // 文件写入失败不影响功能

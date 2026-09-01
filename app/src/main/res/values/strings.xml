@@ -47,6 +47,20 @@
     <string name="btn_start_use">Got it, start using</string>
 
     <string name="status_ok">✓ OK</string>
+    <string name="status_fail">✗</string>
+    <string name="lang_button_prefix">🌐 </string>
+    <string name="notifier_channel_name">Model download</string>
+    <string name="notifier_channel_desc">Voice model download progress</string>
+    <string name="notifier_downloading">Downloading %1$s</string>
+    <string name="notifier_preparing">Preparing %1$s</string>
+    <string name="notifier_extracting">Extracting…</string>
+    <string name="notifier_extracting_bzip2">Extracting (bzip2 is slow, please wait…)</string>
+    <string name="notifier_done_title">Download finished</string>
+    <string name="notifier_done_body">%1$s ready</string>
+    <string name="notifier_failed_title">Download failed</string>
+    <string name="notifier_failed_body">%1$s: %2$s</string>
+    <string name="dbg_err_number">%1$s must be a number</string>
+    <string name="dbg_err_range">%1$s must be between %2$s~%3$s</string>
     <string name="status_ime_enabled">IME enabled in system</string>
     <string name="status_ime_disabled">IME not enabled in system yet</string>
     <string name="status_mic_ok">Microphone granted</string>

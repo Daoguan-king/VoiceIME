@@ -73,21 +73,21 @@ object DebugParams {
         )
     }
 
-    /** 校验并保存。返回 null 表示成功，否则返回错误提示。 */
+    /** 校验并保存。返回 null 表示成功，否则返回错误提示（已本地化）。 */
     fun saveAll(context: Context, values: Map<String, String>): String? {
         val editor = prefs(context).edit()
         try {
-            putFloat(editor, K_VAD_THRESHOLD, values, "VAD 阈值", 0.1f, 0.9f)
-            putFloat(editor, K_VAD_MIN_SILENCE, values, "停顿成段时间", 0.1f, 2.0f)
-            putFloat(editor, K_VAD_MIN_SPEECH, values, "最短语音时间", 0.1f, 2.0f)
-            putInt(editor, K_VAD_WINDOW, values, "VAD 窗口", 256, 512)
-            putFloat(editor, K_VAD_MAX_SPEECH, values, "最长语音时间", 0f, 60f)
-            putInt(editor, K_THREADS, values, "识别线程数", 1, 8)
-            putInt(editor, K_WORKERS, values, "并发解码路数", 1, 8)
-            putLong(editor, K_AUTO_STOP_MS, values, "静音自动停止毫秒", 200L, 5_000L)
-            putInt(editor, K_PREVIEW_CHARS, values, "预览保留字符数", 32, 300)
-            putInt(editor, K_READ_CHUNK_MS, values, "录音读取粒度毫秒", 16, 200)
-            putLong(editor, K_PREVIEW_INTERVAL_MS, values, "预览识别间隔毫秒", 50L, 2_000L)
+            putFloat(context, editor, K_VAD_THRESHOLD, values, R.string.dbg_vad_threshold, 0.1f, 0.9f)
+            putFloat(context, editor, K_VAD_MIN_SILENCE, values, R.string.dbg_min_silence, 0.1f, 2.0f)
+            putFloat(context, editor, K_VAD_MIN_SPEECH, values, R.string.dbg_min_speech, 0.1f, 2.0f)
+            putInt(context, editor, K_VAD_WINDOW, values, R.string.dbg_window, 256, 512)
+            putFloat(context, editor, K_VAD_MAX_SPEECH, values, R.string.dbg_max_speech, 0f, 60f)
+            putInt(context, editor, K_THREADS, values, R.string.dbg_threads, 1, 8)
+            putInt(context, editor, K_WORKERS, values, R.string.dbg_workers, 1, 8)
+            putLong(context, editor, K_AUTO_STOP_MS, values, R.string.dbg_auto_stop, 200L, 5_000L)
+            putInt(context, editor, K_PREVIEW_CHARS, values, R.string.dbg_preview_chars, 32, 300)
+            putInt(context, editor, K_READ_CHUNK_MS, values, R.string.dbg_read_chunk, 16, 200)
+            putLong(context, editor, K_PREVIEW_INTERVAL_MS, values, R.string.dbg_preview_interval, 50L, 2_000L)
         } catch (e: IllegalArgumentException) {
             return e.message
         }
@@ -105,44 +105,65 @@ object DebugParams {
     }
 
     private fun putFloat(
+        context: Context,
         editor: SharedPreferences.Editor,
         key: String,
         values: Map<String, String>,
-        label: String,
+        labelRes: Int,
         min: Float,
         max: Float,
     ) {
         val raw = values[key]?.trim().orEmpty()
-        val v = raw.toFloatOrNull() ?: throw IllegalArgumentException("$label 需为数字")
-        if (v < min || v > max) throw IllegalArgumentException("$label 需在 $min~$max 之间")
+        val label = context.getString(labelRes)
+        val v = raw.toFloatOrNull()
+            ?: throw IllegalArgumentException(context.getString(R.string.dbg_err_number, label))
+        if (v < min || v > max) {
+            throw IllegalArgumentException(
+                context.getString(R.string.dbg_err_range, label, min.toString(), max.toString()),
+            )
+        }
         editor.putFloat(key, v)
     }
 
     private fun putInt(
+        context: Context,
         editor: SharedPreferences.Editor,
         key: String,
         values: Map<String, String>,
-        label: String,
+        labelRes: Int,
         min: Int,
         max: Int,
     ) {
         val raw = values[key]?.trim().orEmpty()
-        val v = raw.toIntOrNull() ?: throw IllegalArgumentException("$label 需为整数")
-        if (v < min || v > max) throw IllegalArgumentException("$label 需在 $min~$max 之间")
+        val label = context.getString(labelRes)
+        val v = raw.toIntOrNull()
+            ?: throw IllegalArgumentException(context.getString(R.string.dbg_err_number, label))
+        if (v < min || v > max) {
+            throw IllegalArgumentException(
+                context.getString(R.string.dbg_err_range, label, min.toString(), max.toString()),
+            )
+        }
         editor.putInt(key, v)
     }
 
     private fun putLong(
+        context: Context,
         editor: SharedPreferences.Editor,
         key: String,
         values: Map<String, String>,
-        label: String,
+        labelRes: Int,
         min: Long,
         max: Long,
     ) {
         val raw = values[key]?.trim().orEmpty()
-        val v = raw.toLongOrNull() ?: throw IllegalArgumentException("$label 需为整数")
-        if (v < min || v > max) throw IllegalArgumentException("$label 需在 $min~$max 之间")
+        val label = context.getString(labelRes)
+        val v = raw.toLongOrNull()
+            ?: throw IllegalArgumentException(context.getString(R.string.dbg_err_number, label))
+        if (v < min || v > max) {
+            throw IllegalArgumentException(
+                context.getString(R.string.dbg_err_range, label, min.toString(), max.toString()),
+            )
+        }
         editor.putLong(key, v)
     }
 }

@@ -49,6 +49,13 @@ class MainActivity : Activity() {
 
     private var statusView: TextView? = null
     private var emotionCheck: CheckBox? = null
+    // 模型选择器相关 view（buildMainUi 中创建，成员函数联动使用）
+    private var familySpinner: Spinner? = null
+    private var modelSpinner: Spinner? = null
+    private var languageSpinner: Spinner? = null
+    private var urlEdit: EditText? = null
+    private var modelDescView: TextView? = null
+    private var spinnerInitialized = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -161,19 +168,21 @@ class MainActivity : Activity() {
         // ASR 模型（两段式：第一段选类型，第二段选具体模型）
         content.addView(sectionTitle(getString(R.string.label_model)))
         val families = ModelFamily.entries
-        val familySpinner = Spinner(this)
-        familySpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            families.map { it.label },
-        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-        familySpinner.setPadding(0, dp(2), 0, dp(6))
+        familySpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                families.map { it.label },
+            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            setPadding(0, dp(2), 0, dp(6))
+        }
         content.addView(familySpinner)
 
-        val modelSpinner = Spinner(this)
-        modelSpinner.setPadding(0, dp(6), 0, dp(2))
+        modelSpinner = Spinner(this).apply {
+            setPadding(0, dp(6), 0, dp(2))
+        }
         content.addView(modelSpinner)
-        val modelDescView = TextView(this).apply {
+        modelDescView = TextView(this).apply {
             textSize = 12f
             setTextColor(getColor(R.color.text_desc))
             setPadding(0, dp(4), 0, dp(8))
@@ -182,18 +191,19 @@ class MainActivity : Activity() {
 
         // 识别语言（仅支持语言选择的模型可用）
         content.addView(sectionTitle(getString(R.string.label_language)))
-        val languageSpinner = Spinner(this)
-        val languageValues = resources.getStringArray(R.array.language_values)
-        languageSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            resources.getStringArray(R.array.language_labels),
-        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        languageSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                resources.getStringArray(R.array.language_labels),
+            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        }
         content.addView(languageSpinner)
+        val languageValues = resources.getStringArray(R.array.language_values)
 
         // 自定义下载源（可选，zip / tar.bz2 / tar.gz 直链；每个模型独立保存）
         content.addView(sectionTitle(getString(R.string.label_custom_url)))
-        val urlEdit = EditText(this).apply {
+        urlEdit = EditText(this).apply {
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             hint = getString(R.string.custom_url_hint)
             setSingleLine(true)
@@ -207,7 +217,7 @@ class MainActivity : Activity() {
             text = getString(R.string.btn_save_custom_url)
             setOnClickListener {
                 prefs.edit()
-                    .putString(Prefs.customUrlKey(currentModel()), urlEdit.text.toString().trim())
+                    .putString(Prefs.customUrlKey(currentModel()), urlEdit?.text.toString().trim())
                     .apply()
                 Toast.makeText(this@MainActivity, R.string.toast_custom_url_saved, Toast.LENGTH_SHORT).show()
             }
@@ -216,7 +226,7 @@ class MainActivity : Activity() {
             text = getString(R.string.btn_clear_custom_url)
             setOnClickListener {
                 prefs.edit().putString(Prefs.customUrlKey(currentModel()), null).apply()
-                urlEdit.setText("")
+                urlEdit?.setText("")
                 Toast.makeText(this@MainActivity, R.string.toast_custom_url_cleared, Toast.LENGTH_SHORT).show()
             }
         })
@@ -236,79 +246,8 @@ class MainActivity : Activity() {
         })
         content.addView(actionRow)
 
-        // ---- 两段式联动逻辑 ----
-        // 注意：family 以 Spinner 当前选中为准，绝不能从 prefs 推导——
-        // prefs 保存的是"上一个模型"，会导致第二段永远重建为旧类型。
-
-        /** 第一段当前选中的类型 */
-        fun selectedFamily(): ModelFamily =
-            families.getOrNull(familySpinner.selectedItemPosition) ?: ModelFamily.SENSE_VOICE
-
-        /** 按第一段当前类型重建第二段下拉，并选中指定模型（null 选第一个） */
-        fun rebuildModelSpinner(selectId: String?) {
-            val specs = AsrModels.byFamily(selectedFamily())
-            modelSpinner.adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_item,
-                specs.map { it.label },
-            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            modelSpinner.setSelection(specs.indexOfFirst { it.id == selectId }.coerceAtLeast(0))
-        }
-
-        /** 应用当前模型选择：保存、刷新介绍/语言/情感/自定义源 */
-        fun applyModelSelection() {
-            val specs = AsrModels.byFamily(selectedFamily())
-            val spec = specs.getOrNull(modelSpinner.selectedItemPosition)
-                ?: specs.firstOrNull()
-                ?: return
-            prefs.edit().putString(Prefs.KEY_MODEL, spec.id).apply()
-            refreshStatus()
-            updateLanguageState(languageSpinner)
-            urlEdit.setText(prefs.getString(Prefs.customUrlKey(spec.id), null).orEmpty())
-            modelDescView.text = spec.summary
-            emotionCheck?.let { updateEmotionState(it) }
-        }
-
-        // 首次布局回调保护：Spinner 挂上监听后会自动回调一次 onItemSelected，
-        // 此时不能重建第二段（否则会丢掉初始化选中的具体模型）
-        var spinnerInitialized = false
-
-        // 初始化选择与监听（先 setSelection 再挂监听，避免初始化时触发保存）
-        val current = currentModelSpec()
-        familySpinner.setSelection(families.indexOf(current.family).coerceAtLeast(0))
-        rebuildModelSpinner(current.id)
-        languageSpinner.setSelection(languageValues.indexOf(currentLanguage()).coerceAtLeast(0))
-        urlEdit.setText(prefs.getString(Prefs.customUrlKey(current.id), null).orEmpty())
-        modelDescView.text = current.summary
-        updateLanguageState(languageSpinner)
-        emotionCheck?.let { updateEmotionState(it) }
-        familySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!spinnerInitialized) {
-                    // 布局阶段的自动回调：初始化已完成，保持当前模型选择
-                    spinnerInitialized = true
-                    return
-                }
-                rebuildModelSpinner(null)
-                applyModelSelection()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        modelSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                applyModelSelection()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        languageSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                prefs.edit().putString(Prefs.KEY_LANGUAGE, languageValues[position]).apply()
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        // 两段式选择器的初始化与联动（逻辑在成员函数中，避免 buildMainUi 继续膨胀）
+        initModelSelector(languageValues)
 
         emotionCheck = CheckBox(this).apply {
             text = getString(R.string.label_emotion_event)
@@ -333,7 +272,7 @@ class MainActivity : Activity() {
             text = getString(R.string.label_model_dir) + ": " +
                 VoiceModelManager.modelRoot(this@MainActivity).absolutePath
             textSize = 12f
-            setTextColor(Color.parseColor("#888888"))
+            setTextColor(getColor(R.color.text_hint_gray))
             setPadding(0, dp(8), 0, 0)
         })
 
@@ -469,6 +408,78 @@ class MainActivity : Activity() {
         }
     }
 
+    /** 第一段当前选中的类型（以 Spinner 当前选中为准，绝不能从 prefs 推导） */
+    private fun selectedFamily(): ModelFamily {
+        val pos = familySpinner?.selectedItemPosition ?: 0
+        return ModelFamily.entries.getOrNull(pos) ?: ModelFamily.SENSE_VOICE
+    }
+
+    /** 按第一段当前类型重建第二段下拉，并选中指定模型（null 选第一个） */
+    private fun rebuildModelSpinner(selectId: String?) {
+        val specs = AsrModels.byFamily(selectedFamily())
+        modelSpinner?.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            specs.map { it.label },
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        modelSpinner?.setSelection(specs.indexOfFirst { it.id == selectId }.coerceAtLeast(0))
+    }
+
+    /** 应用当前模型选择：保存、刷新介绍/语言/情感/自定义源 */
+    private fun applyModelSelection() {
+        val specs = AsrModels.byFamily(selectedFamily())
+        val spec = specs.getOrNull(modelSpinner?.selectedItemPosition ?: 0)
+            ?: specs.firstOrNull()
+            ?: return
+        prefs.edit().putString(Prefs.KEY_MODEL, spec.id).apply()
+        refreshStatus()
+        languageSpinner?.let { updateLanguageState(it) }
+        urlEdit?.setText(prefs.getString(Prefs.customUrlKey(spec.id), null).orEmpty())
+        modelDescView?.text = spec.summary
+        emotionCheck?.let { updateEmotionState(it) }
+    }
+
+    /** 初始化两段式选择器与监听（buildMainUi 末尾调用） */
+    private fun initModelSelector(languageValues: Array<String>) {
+        val current = currentModelSpec()
+        familySpinner?.setSelection(ModelFamily.entries.indexOf(current.family).coerceAtLeast(0))
+        rebuildModelSpinner(current.id)
+        languageSpinner?.setSelection(languageValues.indexOf(currentLanguage()).coerceAtLeast(0))
+        urlEdit?.setText(prefs.getString(Prefs.customUrlKey(current.id), null).orEmpty())
+        modelDescView?.text = current.summary
+        languageSpinner?.let { updateLanguageState(it) }
+        emotionCheck?.let { updateEmotionState(it) }
+
+        // 首次布局回调保护：Spinner 挂上监听后会自动回调一次 onItemSelected，
+        // 此时不能重建第二段（否则会丢掉初始化选中的具体模型）
+        familySpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!spinnerInitialized) {
+                    spinnerInitialized = true
+                    return
+                }
+                rebuildModelSpinner(null)
+                applyModelSelection()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        modelSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                applyModelSelection()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        languageSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                prefs.edit().putString(Prefs.KEY_LANGUAGE, languageValues[position]).apply()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
     private fun updateLanguageState(spinner: Spinner) {
         val enabled = currentModelSpec().supportsLanguage
         spinner.isEnabled = enabled
@@ -518,10 +529,10 @@ class MainActivity : Activity() {
 
     private fun statusLine(ok: Boolean, okRes: Int, failRes: Int): TextView =
         TextView(this).apply {
-            text = (if (ok) getString(R.string.status_ok) + " " else "✗ ") +
+            text = (if (ok) getString(R.string.status_ok) + " " else getString(R.string.status_fail) + " ") +
                 getString(if (ok) okRes else failRes)
             textSize = 13f
-            setTextColor(if (ok) Color.parseColor("#2E7D32") else Color.parseColor("#C62828"))
+            setTextColor(if (ok) getColor(R.color.status_ok) else getColor(R.color.status_fail))
         }
 
     private fun actionButton(text: String, onClick: () -> Unit): Button =

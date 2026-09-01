@@ -9,6 +9,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 /** 识别结果：文本 + SenseVoice 富文本标签（其他模型为空） */
 data class DecodeResult(
@@ -31,6 +32,9 @@ class VoiceRecognizer(
     useItn: Boolean,
     numThreads: Int,
 ) {
+    /** 本实例在途解码数：release 前必须归零（JNI use-after-free 防护） */
+    private val inflight = AtomicInteger(0)
+
     /** 从 spec.files 推导 tokens.txt 路径（支持子目录，如魔搭 data/tokens.txt） */
     private fun tokensPath(): String {
         val rel = spec.files.firstOrNull { it.endsWith("tokens.txt") } ?: "tokens.txt"
@@ -135,6 +139,19 @@ class VoiceRecognizer(
             stream.release()
         }
     }
+
+    /** 开始一次解码（须与 [endDecode] 成对调用；在识别器锁内调用） */
+    fun beginDecode() {
+        inflight.incrementAndGet()
+    }
+
+    /** 结束一次解码（finally 中调用） */
+    fun endDecode() {
+        inflight.decrementAndGet()
+    }
+
+    /** 本实例在途解码数 */
+    fun inflightCount(): Int = inflight.get()
 
     fun release() {
         recognizer.release()

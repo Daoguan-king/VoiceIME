@@ -223,6 +223,9 @@ class StreamingPipeline(
                     if (seq - nextAppendSeq <= workersProvider().coerceIn(1, 8) * 4) {
                         pendingTexts[seq] = text
                     } else {
+                        // 乱序跨度超过窗口：丢弃过期段。removeAll 在 Kotlin 迭代器
+                        // 语义下边遍历边删是安全的（MutableIterator.remove），
+                        // 这里只删 key 小于 seq 的过期项，不会跳过未检查项
                         pendingTexts.keys.removeAll { it < seq }
                         nextAppendSeq = seq
                         pendingTexts.remove(seq)

@@ -97,8 +97,7 @@ object AsrModels {
         kind = ModelKind.SENSE_VOICE,
         dirName = "sensevoice-int8",
         files = listOf("tokens.txt", "model.int8.onnx"),
-        archiveUrl = "https://github.com/BryceWG/BiBi-Keyboard/releases/download/models/" +
-            "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.zip",
+        archiveUrl = GH_ASR + "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2",
         sources = listOf(
             hfSource(
                 "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
@@ -116,8 +115,7 @@ object AsrModels {
         kind = ModelKind.SENSE_VOICE,
         dirName = "sensevoice-full",
         files = listOf("tokens.txt", "model.onnx"),
-        archiveUrl = "https://github.com/BryceWG/BiBi-Keyboard/releases/download/models/" +
-            "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.zip",
+        archiveUrl = GH_ASR + "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
         sources = listOf(
             hfSource(
                 "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
