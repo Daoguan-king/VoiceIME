@@ -118,6 +118,107 @@ object VoiceModelManager {
     }
 
     /**
+     * 把明文 tokens.txt 转成 base64 格式（Moonshine v2 兼容）。
+     *
+     * 背景：sherpa-onnx 的 Moonshine v2 实现会把 tokens.txt 无条件按 base64
+     * 解码（offline-recognizer-moonshine-v2-impl.h → SymbolTable::ApplyBase64Decode），
+     * 其 Base64Decode 遇到 <unk> 等特殊 token 的 '<' 会 SHERPA_ONNX_EXIT(-1)
+     * 直接杀死进程（无崩溃日志）。官方 Moonshine 模型的 tokens.txt 全部是
+     * base64（scripts/moonshine/v2/generate_tokens.py），而 manyeyes 魔搭
+     * 镜像给出的是明文 SentencePiece 格式，二者不兼容。
+     *
+     * 转换规则与官方脚本一致：每个 token 的 UTF-8 字节整体 base64，行内保持
+     * "base64 id"。特例：<0xNN> 字节回退 token 不编码字面字符串，而是编码
+     * 对应的原始单字节——否则 ApplyBase64Decode 后 SymbolTable 返回字面
+     * "<0xA1>" 并出现在识别文本里（SymbolTable 的字节回退检测发生在 base64
+     * 解码之前，全 base64 文件不会置位该标志，只能靠 token 本身携带裸字节）。
+     *
+     * 幂等：明文文件、旧版误转文件（字节 token 编码成了字面 "<0xNN>"）、
+     * 已正确的 base64 文件三种状态均可识别并只做必要的重写。
+     */
+    fun ensureMoonshineBase64Tokens(dir: File) {
+        try {
+            val f = File(dir, "tokens.txt")
+            if (!f.isFile) return
+            val lines = f.readLines().filter { it.isNotBlank() }
+            if (lines.isEmpty()) return
+            val b64Chars = Regex("^[A-Za-z0-9+/]+={0,2}$")
+            val byteToken = Regex("^<0x([0-9A-Fa-f]{2})>$")
+            val decoder = java.util.Base64.getDecoder()
+            val encoder = java.util.Base64.getEncoder()
+
+            fun decodeB64(s: String): ByteArray? =
+                if (s.length % 4 == 0 && b64Chars.matches(s)) {
+                    try {
+                        decoder.decode(s)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                } else {
+                    null
+                }
+
+            // 第一步：每行还原为 (id, 解码后的字节)；allBase64=false 说明是明文文件。
+            // 解析规则与 C++ ReadTokens 对齐：字段按空白分隔（多空格合法）；
+            // 单字段行是"空 token"约定（FunASR 风格，如 base-zh 词表的
+            // " 31353"，ReadTokens 解析为 " "，ApplyBase64Decode 再映射为 ""），
+            // 转换时保持空字节即可原样保留该行；三个以上字段 C++ 会直接
+            // exit，文件本身损坏，不做转换。
+            data class Entry(val id: String, val bytes: ByteArray)
+            val entries = mutableListOf<Entry>()
+            var allBase64 = true
+            for (line in lines) {
+                val parts = line.trim().split(' ').filter { it.isNotEmpty() }
+                when (parts.size) {
+                    1 -> entries.add(Entry(parts[0], ByteArray(0)))
+                    2 -> {
+                        val sym = parts[0]
+                        val decoded = decodeB64(sym)
+                        if (decoded == null) allBase64 = false
+                        entries.add(Entry(parts[1], decoded ?: sym.toByteArray(Charsets.UTF_8)))
+                    }
+                    else -> {
+                        AppLog.w(TAG, "tokens.txt 存在异常行，跳过 base64 转换: ${dir.name}")
+                        return
+                    }
+                }
+            }
+
+            // 第二步：计算目标字节。解码后仍为字面 "<0xNN>"（明文残留或旧版误转）
+            // → 修正为原始单字节；明文 token → UTF-8 字节；正确 base64 → 保持
+            var needRewrite = false
+            val sb = StringBuilder(entries.size * 16)
+            for (e in entries) {
+                val text = String(e.bytes, Charsets.UTF_8)
+                val m = byteToken.find(text)
+                val target: ByteArray = when {
+                    m != null -> {
+                        needRewrite = true
+                        byteArrayOf(m.groupValues[1].toInt(16).toByte())
+                    }
+                    !allBase64 -> {
+                        needRewrite = true
+                        e.bytes
+                    }
+                    else -> e.bytes
+                }
+                sb.append(encoder.encodeToString(target)).append(' ').append(e.id).append('\n')
+            }
+            if (!needRewrite) return
+            // 原子替换，避免转换中途留下残缺文件
+            val tmp = File(dir, "tokens.txt.part")
+            tmp.writeText(sb.toString())
+            if (!tmp.renameTo(f)) {
+                tmp.copyTo(f, overwrite = true)
+                tmp.delete()
+            }
+            AppLog.i(TAG, "tokens.txt 已转换为 base64 格式（Moonshine v2 兼容）: ${dir.name}")
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "tokens.txt base64 转换失败: " + (t.message ?: t.javaClass.simpleName))
+        }
+    }
+
+    /**
      * 下载模型（多源回退，通知栏显示进度，失败原因写入 AppLog）：
      * 1. 自定义 URL（若提供）→ 压缩包（zip / tar.bz2 / tar.gz，自动识别）；
      * 2. HF 镜像（hf-mirror.com）逐文件下载——无需解压，官方 tar.bz2 的
@@ -460,9 +561,14 @@ object VoiceModelManager {
 
     /**
      * 下载单个文件到 target；校验 HTTP 状态与 Content-Length。
+     * 先写同目录 .part 临时文件、成功后原子 rename：下载中途失败时不会在
+     * 模型目录留下半截文件（否则 isModelReady 只查存在性会误判"已就绪"，
+     * 加载残缺 onnx 会导致原生层直接退出）。
      * onProgress 回调 (已下载字节, 总字节)；失败原因写入 AppLog。返回是否成功。
      */
     private fun downloadFile(url: String, target: File, onProgress: (Long, Long) -> Unit): Boolean {
+        target.parentFile?.mkdirs()
+        val part = File(target.parentFile, target.name + ".part")
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.instanceFollowRedirects = true
         connection.connectTimeout = 15_000
@@ -477,7 +583,7 @@ object VoiceModelManager {
             val expected = connection.contentLengthLong
             var written = 0L
             connection.inputStream.use { input ->
-                FileOutputStream(target).use { output ->
+                FileOutputStream(part).use { output ->
                     val buf = ByteArray(64 * 1024)
                     while (true) {
                         val n = input.read(buf)
@@ -497,11 +603,17 @@ object VoiceModelManager {
                 AppLog.w(TAG, "大小不匹配: expected=$expected got=$written url=$url")
                 return false
             }
+            // 完整才落正式文件名（同卷 rename 原子生效；失败回退复制）
+            if (!part.renameTo(target)) {
+                part.copyTo(target, overwrite = true)
+                part.delete()
+            }
             return true
         } catch (t: Throwable) {
             AppLog.w(TAG, "下载异常: $url - " + (t.message ?: t.javaClass.simpleName))
             return false
         } finally {
+            part.delete()
             connection.disconnect()
         }
     }

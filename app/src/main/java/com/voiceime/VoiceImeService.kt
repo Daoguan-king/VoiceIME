@@ -10,7 +10,6 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowInsets
@@ -165,12 +164,14 @@ class VoiceImeService : InputMethodService() {
 
     override fun onStartInputView(editorInfo: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(editorInfo, restarting)
+        AppLog.i(TAG, "onStartInputView restarting=$restarting")
         // 仿 Google 语音输入：被切换过来即自动开始录音
         if (!recording) start()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        AppLog.i(TAG, "onFinishInputView finishing=$finishingInput recording=$recording")
         // 离开时丢弃未完成的录音
         if (recording) {
             recording = false
@@ -191,10 +192,12 @@ class VoiceImeService : InputMethodService() {
         val context = applicationContext
         // 每次录音读取最新调试参数
         debug = DebugParams.read(this)
-        emotionEvent = prefs().getBoolean(Prefs.KEY_EMOTION_EVENT, false)
+        // 情感/事件仅原版 SenseVoiceSmall 支持（"2025"实为 WSYue 粤语模型，无此能力）
+        emotionEvent = prefs().getBoolean(Prefs.KEY_EMOTION_EVENT, false) && modelSpec.supportsEmotionEvent
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            AppLog.w(TAG, "无麦克风权限，无法开始录音")
             setStatus(getString(R.string.status_no_permission))
             Toast.makeText(this, R.string.status_no_permission, Toast.LENGTH_SHORT).show()
             val intent = Intent(context, PermissionActivity::class.java)
@@ -206,7 +209,7 @@ class VoiceImeService : InputMethodService() {
         val spec = modelSpec
         val modelDir = VoiceModelManager.resolveModelDir(context, spec)
         if (modelDir == null) {
-            AppLog.i("VoiceIme", "模型缺失，自动下载: ${spec.id}")
+            AppLog.i(TAG, "模型缺失，自动下载: ${spec.id}")
             setStatus(getString(R.string.status_downloading))
             scope.launch {
                 val custom = prefs().getString(Prefs.customUrlKey(spec.id), null)
@@ -220,7 +223,7 @@ class VoiceImeService : InputMethodService() {
         recordJob?.cancel()
         recording = true
         sessionStartMs = SystemClock.elapsedRealtime()
-        AppLog.i("VoiceIme", "开始录音会话 #$mySession，模型: ${spec.id}，目录: ${modelDir.absolutePath}")
+        AppLog.i(TAG, "开始录音会话 #$mySession，模型: ${spec.id}，目录: ${modelDir.absolutePath}")
         sessionModelDir = modelDir
         sessionModelId = spec.id
         sessionRecognizerKey = spec.id + "|" + modelDir.absolutePath + "|" + language + "|" + debug.decodeThreads.coerceIn(1, 8)
@@ -278,6 +281,7 @@ class VoiceImeService : InputMethodService() {
 
     /** 结束录音：录音循环退出后，同一个协程继续做整段识别并上屏 */
     private fun stopAndRecognize() {
+        AppLog.i(TAG, "手动结束录音")
         recording = false
     }
 
@@ -286,7 +290,7 @@ class VoiceImeService : InputMethodService() {
             currentInputConnection?.commitText(text, 1)
         } catch (t: Throwable) {
             // 输入连接可能已失效（如输入法窗口正在关闭），不影响后续状态
-            Log.w(TAG, "commitText failed", t)
+            AppLog.w(TAG, "commitText failed", t)
         }
         AppLog.i(TAG, "识别上屏: " + text.take(60))
         setStatus(getString(R.string.status_done))
@@ -299,7 +303,7 @@ class VoiceImeService : InputMethodService() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             // 仅启用一个输入法时没有"上一个"可切，直接切换会把键盘收起
             if (imm.enabledInputMethodList.size <= 1) {
-                Log.i(TAG, "Only one IME enabled, skip switch back")
+                AppLog.i(TAG, "Only one IME enabled, skip switch back")
                 return
             }
             // 切回目标候选：排除自己与语音型输入法（mode=voice），只考虑键盘输入法
@@ -332,7 +336,7 @@ class VoiceImeService : InputMethodService() {
             switchInputMethod(fallback.id)
             AppLog.i(TAG, "fallback switchInputMethod -> ${fallback.id}")
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to switch back to previous IME", t)
+            AppLog.w(TAG, "Failed to switch back to previous IME", t)
         }
     }
 
@@ -375,7 +379,7 @@ class VoiceImeService : InputMethodService() {
             )
             Vad(assetManager = assets, config = config)
         } catch (t: Throwable) {
-            Log.w(TAG, "VAD init failed, fallback to time-based partial", t)
+            AppLog.w(TAG, "VAD init failed, fallback to time-based partial", t)
             null
         }
     }
@@ -384,7 +388,7 @@ class VoiceImeService : InputMethodService() {
         try {
             vad?.release()
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to release VAD", t)
+            AppLog.w(TAG, "Failed to release VAD", t)
         }
         vad = null
     }
@@ -420,6 +424,7 @@ class VoiceImeService : InputMethodService() {
                 pipeline.onSpeechDetected()
             } else if (hasDetectedSpeech && now - lastSpeechAtMs >= debug.autoStopMs) {
                 // 静音自动结束
+                AppLog.i(TAG, "静音超时自动结束录音")
                 recording = false
                 return
             }
@@ -428,10 +433,11 @@ class VoiceImeService : InputMethodService() {
                 val seg = vad.front()
                 val segSamples = seg.samples
                 vad.pop()
+                AppLog.i(TAG, "VAD 出段: ${segSamples.size} samples")
                 pipeline.onSegmentCompleted(segSamples)
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "VAD processing failed", t)
+            AppLog.w(TAG, "VAD processing failed", t)
         }
     }
 
@@ -487,7 +493,10 @@ class VoiceImeService : InputMethodService() {
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        if (minBuf <= 0) return ByteArray(0)
+        if (minBuf <= 0) {
+            AppLog.e(TAG, "AudioRecord.getMinBufferSize 异常: $minBuf")
+            return ByteArray(0)
+        }
         // 读取粒度可调（官方 Demo 为 32ms/512 samples），越小 VAD 响应越快
         val bufferSize = maxOf(minBuf, SAMPLE_RATE / 1000 * debug.readChunkMs * 2)
         val record = AudioRecord(
@@ -498,6 +507,7 @@ class VoiceImeService : InputMethodService() {
             bufferSize,
         )
         if (record.state != AudioRecord.STATE_INITIALIZED) {
+            AppLog.e(TAG, "AudioRecord 初始化失败，无法录音")
             record.release()
             return ByteArray(0)
         }
@@ -507,6 +517,7 @@ class VoiceImeService : InputMethodService() {
             while (recording && currentCoroutineContext().isActive) {
                 // 单次录音时长上限，防止内存无限增长
                 if (SystemClock.elapsedRealtime() - sessionStartMs > MAX_SESSION_MS) {
+                    AppLog.i(TAG, "达到单次录音时长上限，自动结束")
                     recording = false
                     break
                 }
@@ -622,13 +633,14 @@ class VoiceImeService : InputMethodService() {
                 }
                 old.release()
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to release old recognizer", t)
+                AppLog.w(TAG, "Failed to release old recognizer", t)
             }
         }.apply { isDaemon = true }.start()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        AppLog.i(TAG, "onDestroy")
         scope.cancel()
         // 释放当前识别器（若有在途解码则等待其结束，避免 JNI use-after-free）
         synchronized(recognizerLock) {

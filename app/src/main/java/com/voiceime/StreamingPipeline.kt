@@ -71,6 +71,7 @@ class StreamingPipeline(
     fun onSessionStart() {
         previewJob?.cancel()
         val jobSession = sessionProvider()
+        AppLog.i("StreamingPipeline", "会话 #$jobSession 流式管线启动")
         previewJob = scope.launch(Dispatchers.IO) {
             try {
                 while (sessionProvider() == jobSession && recordingProvider()) {
@@ -98,17 +99,18 @@ class StreamingPipeline(
                             }
                         }
                     } catch (t: Throwable) {
-                        android.util.Log.w("StreamingPipeline", "Preview decode failed", t)
+                        AppLog.w("StreamingPipeline", "Preview decode failed", t)
                     }
                 }
             } catch (t: Throwable) {
-                android.util.Log.w("StreamingPipeline", "Preview worker stopped", t)
+                AppLog.w("StreamingPipeline", "Preview worker stopped", t)
             }
         }
     }
 
     /** 会话结束/重置：停协程、清状态 */
     fun reset() {
+        AppLog.i("StreamingPipeline", "流式管线重置")
         workerJobs.forEach { it.cancel() }
         workerJobs.clear()
         previewJob?.cancel()
@@ -195,11 +197,11 @@ class StreamingPipeline(
                                 appendOrdered(seq, text.trim(), jobSession)
                             }
                         } catch (t: Throwable) {
-                            android.util.Log.w("StreamingPipeline", "Partial decode failed", t)
+                            AppLog.w("StreamingPipeline", "Partial decode failed", t)
                         }
                     }
                 } catch (t: Throwable) {
-                    android.util.Log.w("StreamingPipeline", "Partial worker stopped", t)
+                    AppLog.w("StreamingPipeline", "Partial worker stopped", t)
                 }
             }
         }
@@ -238,6 +240,7 @@ class StreamingPipeline(
         }
         if (toAppend != null && sessionProvider() == jobSession) {
             synchronized(lock) { fixedLines.addAll(toAppend) }
+            AppLog.i("StreamingPipeline", "分段固化 #$seq: ${text.take(40)}")
             emitPreview()
         }
     }

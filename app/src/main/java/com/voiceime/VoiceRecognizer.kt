@@ -28,10 +28,14 @@ data class DecodeResult(
 class VoiceRecognizer(
     private val modelDir: File,
     private val spec: ModelSpec,
-    language: String,
-    useItn: Boolean,
-    numThreads: Int,
+    private val language: String,
+    private val useItn: Boolean,
+    private val numThreads: Int,
 ) {
+    companion object {
+        private const val TAG = "VoiceRecognizer"
+    }
+
     /** 本实例在途解码数：release 前必须归零（JNI use-after-free 防护） */
     private val inflight = AtomicInteger(0)
 
@@ -41,9 +45,26 @@ class VoiceRecognizer(
         return File(modelDir, rel).absolutePath
     }
 
-    private val recognizer: OfflineRecognizer = OfflineRecognizer(
-        assetManager = null,
-        config = OfflineRecognizerConfig().apply {
+    private val recognizer: OfflineRecognizer = createRecognizer()
+
+    /**
+     * 构造识别器（加载模型，可能耗时数秒）。
+     * "开始加载模型"/"识别器创建成功"成对落盘：若进程在加载中途死亡
+     * （sherpa-onnx 对加载失败会直接 exit，进程静默消失、无崩溃日志），
+     * 日志尾迹停在"开始加载"即说明死在模型加载阶段——通常是模型文件
+     * 损坏或不兼容，需在设置中删除该模型重新下载。
+     */
+    private fun createRecognizer(): OfflineRecognizer = try {
+        AppLog.i(TAG, "开始加载模型: ${spec.id} @ ${modelDir.absolutePath}, threads=$numThreads, language=$language")
+        if (spec.kind == ModelKind.MOONSHINE_V2) {
+            // manyeyes 魔搭镜像的 tokens.txt 是明文格式，sherpa-onnx Moonshine v2
+            // 会按 base64 解码，遇到 <unk> 等特殊 token 直接 exit 杀死进程；
+            // 加载前统一转换（幂等，官方 base64 格式自动跳过）
+            VoiceModelManager.ensureMoonshineBase64Tokens(modelDir)
+        }
+        OfflineRecognizer(
+            assetManager = null,
+            config = OfflineRecognizerConfig().apply {
             this.modelConfig = OfflineModelConfig().apply {
                 this.numThreads = numThreads
                 this.provider = "cpu"
@@ -114,7 +135,13 @@ class VoiceRecognizer(
                 }
             }
         },
-    )
+        ).also {
+            AppLog.i(TAG, "识别器创建成功: ${spec.id}")
+        }
+    } catch (t: Throwable) {
+        AppLog.e(TAG, "模型加载失败（文件可能损坏或不兼容，请在设置中删除该模型后重新下载）: ${spec.id}", t)
+        throw t
+    }
 
     /** 对一段音频做离线识别，返回识别文本（可能为空）。 */
     fun decodeText(samples: FloatArray, sampleRate: Int): String =
@@ -125,16 +152,24 @@ class VoiceRecognizer(
      * 非 SenseVoice 模型 emotion/event 为空字符串。
      */
     fun decode(samples: FloatArray, sampleRate: Int): DecodeResult {
+        val startMs = android.os.SystemClock.elapsedRealtime()
         val stream = recognizer.createStream()
         try {
             stream.acceptWaveform(samples, sampleRate)
             recognizer.decode(stream)
             val result = recognizer.getResult(stream)
+            val costMs = android.os.SystemClock.elapsedRealtime() - startMs
+            if (costMs > 5000) {
+                AppLog.w(TAG, "解码偏慢: ${costMs}ms（${samples.size / sampleRate}s 音频）")
+            }
             return DecodeResult(
                 text = result.text,
                 emotion = result.emotion ?: "",
                 event = result.event ?: "",
             )
+        } catch (t: Throwable) {
+            AppLog.e(TAG, "解码失败（${samples.size} samples，已耗时 ${android.os.SystemClock.elapsedRealtime() - startMs}ms）", t)
+            throw t
         } finally {
             stream.release()
         }
@@ -154,6 +189,8 @@ class VoiceRecognizer(
     fun inflightCount(): Int = inflight.get()
 
     fun release() {
+        // 先落盘再释放：若 release 触发原生崩溃，日志尾迹能定位到这一步
+        AppLog.i(TAG, "识别器释放: ${spec.id}")
         recognizer.release()
     }
 }

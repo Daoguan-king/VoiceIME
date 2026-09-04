@@ -75,6 +75,14 @@ data class ModelSpec(
     val requiredBytes: Long,
     /** 是否支持语言选择（仅 SenseVoice 支持） */
     val supportsLanguage: Boolean = true,
+
+    /**
+     * 是否支持情感/事件检测（富文本标签）。
+     * 仅原版 SenseVoiceSmall（iic/SenseVoiceSmall）训练了情感/事件头；
+     * 注意 "sensevoice-int8-2025" 实为 ASLP-lab/WSYue-ASR（粤语特化），
+     * 架构同为 sense_voice_ctc 但无情感/事件能力。
+     */
+    val supportsEmotionEvent: Boolean = false,
 )
 
 object AsrModels {
@@ -86,6 +94,15 @@ object AsrModels {
     /** 构造一个 hf-mirror 逐文件源 */
     private fun hfSource(modelDir: String, files: List<String>): ModelSource =
         ModelSource("hf-mirror", HF + modelDir + "/resolve/main/", files)
+
+    /**
+     * 构造一个魔搭逐文件源。注意：只接经过校验的镜像仓库——
+     * 魔搭上同名仓库很多，文件未必与官方一致（如 manyeyes/sensevoice-small-int8-onnx
+     * 是 FunASR runtime 格式，缺 sherpa-onnx metadata，加载会直接退出）。
+     * 下列仓库已用官方发布文件的 sha256 逐字节比对验证。
+     */
+    private fun modelScopeSource(repo: String, files: List<String>): ModelSource =
+        ModelSource("modelscope", "https://www.modelscope.cn/models/" + repo + "/resolve/master/", files)
 
     // ---------------- SenseVoice ----------------
 
@@ -99,12 +116,18 @@ object AsrModels {
         files = listOf("tokens.txt", "model.int8.onnx"),
         archiveUrl = GH_ASR + "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2",
         sources = listOf(
+            // sha256 与官方发布逐字节一致（model.int8.onnx=c71f0ce0…, tokens.txt=f449eb28…）
+            modelScopeSource(
+                "Mr7Cat/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+                listOf("tokens.txt", "model.int8.onnx"),
+            ),
             hfSource(
                 "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
                 listOf("tokens.txt", "model.int8.onnx"),
             ),
         ),
         requiredBytes = 350L * 1024 * 1024,
+        supportsEmotionEvent = true,
     )
 
     val SENSE_VOICE_FULL = ModelSpec(
@@ -117,6 +140,11 @@ object AsrModels {
         files = listOf("tokens.txt", "model.onnx"),
         archiveUrl = GH_ASR + "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
         sources = listOf(
+            // 该仓库的 int8 文件与官方逐字节一致，fp32（model.onnx 937MB）取自同一官方发布
+            modelScopeSource(
+                "WEAAEW/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+                listOf("tokens.txt", "model.onnx"),
+            ),
             hfSource(
                 "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
                 listOf("tokens.txt", "model.onnx"),
@@ -127,14 +155,19 @@ object AsrModels {
 
     val SENSE_VOICE_INT8_2025 = ModelSpec(
         id = "sensevoice-int8-2025",
-        label = "small（int8）2025-09-09",
-        summary = "约 170 MB · 2025 新版",
+        label = "small 粤语（int8，WSYue）",
+        summary = "约 170 MB · 粤语特化（ASLP-lab/WSYue-ASR，架构同 SenseVoice）· 无情感/事件",
         family = ModelFamily.SENSE_VOICE,
         kind = ModelKind.SENSE_VOICE,
         dirName = "sensevoice-int8-2025",
         files = listOf("tokens.txt", "model.int8.onnx"),
         archiveUrl = GH_ASR + "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2",
         sources = listOf(
+            // sha256 与官方发布逐字节一致（model.int8.onnx=12ca1a2a…, tokens.txt=f449eb28…）
+            modelScopeSource(
+                "Mr7Cat/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
+                listOf("tokens.txt", "model.int8.onnx"),
+            ),
             hfSource(
                 "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
                 listOf("tokens.txt", "model.int8.onnx"),

@@ -34,8 +34,8 @@ object EmotionEvent {
         "<|Breath|>" to "呼吸",
     )
 
-    /** 是否支持富文本（仅 SenseVoice 模型） */
-    fun supported(spec: ModelSpec): Boolean = spec.kind == ModelKind.SENSE_VOICE
+    /** 是否支持富文本（仅原版 SenseVoiceSmall；WSYue 粤语模型无情感/事件能力） */
+    fun supported(spec: ModelSpec): Boolean = spec.supportsEmotionEvent
 
     /**
      * 生成附加标签文本；默认状态（平静 / 说话）或全部缺失时返回空串。

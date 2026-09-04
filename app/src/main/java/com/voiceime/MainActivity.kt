@@ -2,6 +2,8 @@ package com.voiceime
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -31,6 +33,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * VoiceIME 设置页：
@@ -486,9 +489,9 @@ class MainActivity : Activity() {
         spinner.alpha = if (enabled) 1f else 0.4f
     }
 
-    /** 情感/事件检测仅 SenseVoice 支持 */
+    /** 情感/事件检测仅原版 SenseVoiceSmall 支持（WSYue 粤语模型无此能力） */
     private fun updateEmotionState(check: CheckBox) {
-        val enabled = currentModelSpec().kind == ModelKind.SENSE_VOICE
+        val enabled = currentModelSpec().supportsEmotionEvent
         check.isEnabled = enabled
         check.alpha = if (enabled) 1f else 0.4f
     }
@@ -555,15 +558,106 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 应用内日志弹窗（含下载失败原因） */
+    /** 应用内日志弹窗：级别过滤 + 复制/分享 + 崩溃日志查看（含下载失败原因） */
     private fun showLogsDialog() {
-        val entries = AppLog.snapshot()
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(4), dp(8), 0)
+        }
+
+        // 级别过滤
+        val filter = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                listOf(
+                    getString(R.string.logs_filter_all),
+                    getString(R.string.logs_filter_warn),
+                    getString(R.string.logs_filter_error),
+                ),
+            ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        }
+        container.addView(filter)
+
+        // 操作行：复制 / 分享 / 清空 / 崩溃日志（无崩溃时隐藏）
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(8), 0, dp(8), dp(4))
+        }
         val body = TextView(this).apply {
-            text = if (entries.isEmpty()) {
+            textSize = 11f
+            setTypeface(Typeface.MONOSPACE)
+            setTextIsSelectable(true)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        fun currentText(): String {
+            val minLevel = when (filter.selectedItemPosition) {
+                1 -> LogLevel.WARN
+                2 -> LogLevel.ERROR
+                else -> null
+            }
+            val list = AppLog.entriesSnapshot().filter { minLevel == null || it.level >= minLevel }
+            return if (list.isEmpty()) {
                 getString(R.string.logs_empty)
             } else {
-                entries.joinToString("\n")
+                list.joinToString("\n") { AppLog.formatEntry(it) }
             }
+        }
+        btnRow.addView(dialogButton(R.string.logs_copy) {
+            copyText(currentText())
+        })
+        btnRow.addView(dialogButton(R.string.logs_share) {
+            shareText(currentText())
+        })
+        btnRow.addView(dialogButton(R.string.logs_clear) {
+            AppLog.clear()
+            body.text = currentText()
+            toast(R.string.logs_cleared)
+        })
+        if (AppLog.crashLogs().isNotEmpty()) {
+            btnRow.addView(dialogButton(R.string.logs_crash) { showCrashLogsDialog() })
+        }
+        container.addView(btnRow)
+
+        val scroll = ScrollView(this).apply { addView(body) }
+        container.addView(scroll)
+        body.text = currentText()
+        // 最新日志在底部：打开时滚动到底
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+
+        filter.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                body.text = currentText()
+                scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.logs_title)
+            .setView(container)
+            .setPositiveButton(R.string.logs_close, null)
+            .show()
+    }
+
+    private fun showCrashLogsDialog() {
+        val crashes = AppLog.crashLogs()
+        if (crashes.isEmpty()) {
+            toast(R.string.logs_crash_empty)
+            return
+        }
+        val names = crashes.map { it.name + " (" + (it.length() / 1024) + " KB)" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.logs_crash_title)
+            .setItems(names) { _, which -> showCrashContentDialog(crashes[which]) }
+            .setNegativeButton(R.string.logs_close, null)
+            .show()
+    }
+
+    private fun showCrashContentDialog(f: File) {
+        val body = TextView(this).apply {
+            text = AppLog.readCrashLog(f)
             textSize = 11f
             setTypeface(Typeface.MONOSPACE)
             setTextIsSelectable(true)
@@ -571,15 +665,37 @@ class MainActivity : Activity() {
         }
         val scroll = ScrollView(this).apply { addView(body) }
         AlertDialog.Builder(this)
-            .setTitle(R.string.logs_title)
+            .setTitle(f.name)
             .setView(scroll)
-            .setPositiveButton(R.string.logs_clear) { _, _ ->
-                AppLog.clear()
-                toast(R.string.logs_cleared)
-            }
-            .setNegativeButton(R.string.logs_close, null)
+            .setPositiveButton(R.string.logs_close, null)
+            .setNeutralButton(R.string.logs_share) { _, _ -> shareText(AppLog.readCrashLog(f)) }
             .show()
     }
+
+    private fun copyText(text: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("voiceime", text))
+        Toast.makeText(this, R.string.logs_copied, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun shareText(text: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.logs_share)))
+    }
+
+    /** 日志弹窗内的小号按钮 */
+    private fun dialogButton(textRes: Int, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = getString(textRes)
+            textSize = 12f
+            minHeight = 0
+            minWidth = 0
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            setOnClickListener { onClick() }
+        }
 
     override fun onDestroy() {
         super.onDestroy()

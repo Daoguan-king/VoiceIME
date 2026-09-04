@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
 
 /**
  * 模型下载通知（通知栏进度条）。
@@ -44,7 +43,7 @@ object DownloadNotifier {
         try {
             nm.notify(NOTIFICATION_ID, builder.build())
         } catch (t: Throwable) {
-            Log.w(TAG, "notify failed", t)
+            AppLog.w(TAG, "notify failed", t)
         }
     }
 

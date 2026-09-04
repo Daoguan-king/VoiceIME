@@ -92,6 +92,15 @@
     <string name="logs_close">Close</string>
     <string name="logs_empty">(no log entries)</string>
     <string name="logs_cleared">Log cleared</string>
+    <string name="logs_copy">Copy</string>
+    <string name="logs_copied">Copied to clipboard</string>
+    <string name="logs_share">Share</string>
+    <string name="logs_filter_all">All levels</string>
+    <string name="logs_filter_warn">Warnings+</string>
+    <string name="logs_filter_error">Errors only</string>
+    <string name="logs_crash">Crash logs</string>
+    <string name="logs_crash_title">Crash logs</string>
+    <string name="logs_crash_empty">No crash logs</string>
     <string-array name="model_variant_labels">
         <item>Small (int8, ~170 MB, recommended)</item>
         <item>Small (fp32, ~900 MB)</item>
