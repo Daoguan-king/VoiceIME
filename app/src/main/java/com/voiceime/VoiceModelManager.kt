@@ -16,6 +16,7 @@ package com.voiceime
 
 import android.content.Context
 import android.os.StatFs
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -32,6 +33,14 @@ import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 
 object VoiceModelManager {
     private const val TAG = "VoiceModelManager"
+
+    /**
+     * 解压用读取缓冲大小（1MB，≥ bzip2 最大块 900KB）。
+     * 必须用大缓冲包装 FileInputStream：commons-compress 的 BZip2 位读取器
+     * 逐字节调用 in.read()，直连文件流会退化成"每字节一次 JNI 系统调用"，
+     * 解压速度慢一个数量级以上。
+     */
+    private const val EXTRACT_BUFFER_SIZE = 1024 * 1024
 
     /**
      * 模型根目录：优先外部存储（/Android/data/<pkg>/files/models，用户可访问），
@@ -172,8 +181,12 @@ object VoiceModelManager {
                 DownloadNotifier.progress(context, spec, done, total)
             }
             if (!ok) return false
-            DownloadNotifier.progress(context, spec, 0, 0, extractHint(context, archive))
-            extractArchive(archive, root)
+            val hint = extractHint(context, archive)
+            DownloadNotifier.progress(context, spec, 0, 0, hint)
+            val archiveSize = archive.length()
+            extractArchive(archive, root) { done, total ->
+                DownloadNotifier.progress(context, spec, done, total, hint)
+            }
             archive.delete()
             if (isModelReady(root, spec)) {
                 AppLog.i(TAG, "模型下载成功（压缩包）: $url")
@@ -234,21 +247,26 @@ object VoiceModelManager {
 
     private enum class TarCompression { NONE, GZIP, BZIP2 }
 
-    /** 自动识别格式：zip / tar.bz2 / tar.gz / 裸 tar */
-    private fun extractArchive(archive: File, root: File) {
+    /** 自动识别格式：zip / tar.bz2 / tar.gz / 裸 tar；onProgress = (已解压消费的压缩字节, 压缩包总字节) */
+    private fun extractArchive(archive: File, root: File, onProgress: (Long, Long) -> Unit) {
         root.mkdirs()
         val tmp = File(root, ".extract-" + System.currentTimeMillis())
         tmp.mkdirs()
         try {
-            val rels = extractAll(archive, tmp)
+            val rels = extractAll(archive, tmp, onProgress)
             relocate(tmp, root, rels)
         } finally {
             tmp.deleteRecursively()
         }
     }
 
-    private fun extractAll(archive: File, tmp: File): List<String> = when (sniffFormat(archive)) {
+    private fun extractAll(
+        archive: File,
+        tmp: File,
+        onProgress: (Long, Long) -> Unit,
+    ): List<String> = when (sniffFormat(archive)) {
         ArchiveFormat.ZIP -> {
+            // zip 条目自带压缩，读取很快，不做逐字节进度
             val rels = mutableListOf<String>()
             ZipInputStream(archive.inputStream().buffered()).use { zis ->
                 var e = zis.nextEntry
@@ -266,9 +284,9 @@ object VoiceModelManager {
             }
             rels
         }
-        ArchiveFormat.BZIP2 -> extractTar(archive, tmp, TarCompression.BZIP2)
-        ArchiveFormat.GZIP -> extractTar(archive, tmp, TarCompression.GZIP)
-        ArchiveFormat.TAR -> extractTar(archive, tmp, TarCompression.NONE)
+        ArchiveFormat.BZIP2 -> extractTar(archive, tmp, TarCompression.BZIP2, onProgress)
+        ArchiveFormat.GZIP -> extractTar(archive, tmp, TarCompression.GZIP, onProgress)
+        ArchiveFormat.TAR -> extractTar(archive, tmp, TarCompression.NONE, onProgress)
         ArchiveFormat.UNKNOWN -> throw IOException("不支持的压缩包格式: ${archive.name}")
     }
 
@@ -300,31 +318,51 @@ object VoiceModelManager {
         }
     }
 
-    private fun tarInput(file: File, compression: TarCompression): TarArchiveInputStream {
-        val raw = FileInputStream(file)
+    /**
+     * 构造 tar 输入流，返回 (tar 流, 底层字节计数器)。
+     * 关键：compressor 流必须架在 BufferedInputStream(counting) 之上——
+     * BZip2 的位读取器逐字节调用 in.read()，不缓冲会把 FileInputStream
+     * 打成"每字节一次 JNI 系统调用"，这是此前 bzip2 解压缓慢的直接原因。
+     */
+    private fun tarInput(
+        file: File,
+        compression: TarCompression,
+    ): Pair<TarArchiveInputStream, CountingInputStream> {
+        val counting = CountingInputStream(FileInputStream(file))
+        val buffered = BufferedInputStream(counting, EXTRACT_BUFFER_SIZE)
         val dec: InputStream = when (compression) {
-            TarCompression.NONE -> raw
-            TarCompression.GZIP -> GZIPInputStream(raw)
-            TarCompression.BZIP2 -> BZip2CompressorInputStream(raw)
+            TarCompression.NONE -> buffered
+            TarCompression.GZIP -> GZIPInputStream(buffered)
+            TarCompression.BZIP2 -> BZip2CompressorInputStream(buffered)
         }
-        return TarArchiveInputStream(dec)
+        return TarArchiveInputStream(dec) to counting
     }
 
-    private fun extractTar(archive: File, tmp: File, compression: TarCompression): List<String> {
+    private fun extractTar(
+        archive: File,
+        tmp: File,
+        compression: TarCompression,
+        onProgress: (Long, Long) -> Unit,
+    ): List<String> {
         val rels = mutableListOf<String>()
-        tarInput(archive, compression).use { tar ->
-            var e = tar.nextTarEntry
+        val archiveSize = archive.length().coerceAtLeast(1L)
+        val (tar, counting) = tarInput(archive, compression)
+        tar.use {
+            var e = it.nextTarEntry
             while (e != null) {
                 if (!e.isDirectory) {
                     val rel = sanitizeRel(e.name)
                     if (rel != null && isWantedFile(rel)) {
-                        writeEntry(tar, File(tmp, rel))
+                        writeEntry(it, File(tmp, rel)) { onProgress(counting.bytesRead, archiveSize) }
                         rels.add(rel)
+                    } else {
+                        onProgress(counting.bytesRead, archiveSize)
                     }
                 }
-                e = tar.nextTarEntry
+                e = it.nextTarEntry
             }
         }
+        onProgress(archiveSize, archiveSize)
         return rels
     }
 
@@ -332,7 +370,8 @@ object VoiceModelManager {
     private fun isWantedFile(rel: String): Boolean {
         if (rel.startsWith("tokenizer/")) return true
         val name = rel.substringAfterLast('/')
-        return name == "tokens.txt" || name.endsWith(".onnx")
+        // .ort：Moonshine v2 官方包为 encoder_model.ort / decoder_model_merged.ort
+        return name == "tokens.txt" || name.endsWith(".onnx") || name.endsWith(".ort")
     }
 
     /** 归一化条目路径；拒绝绝对路径与路径穿越 */
@@ -372,7 +411,39 @@ object VoiceModelManager {
         }
     }
 
-    private fun writeEntry(input: InputStream, target: File) {
+    /** 底层字节计数流（解压进度用）：统计从磁盘实际读走的字节数 */
+    private class CountingInputStream(private val src: InputStream) : InputStream() {
+        var bytesRead: Long = 0
+            private set
+
+        override fun read(): Int {
+            val r = src.read()
+            if (r >= 0) bytesRead++
+            return r
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val r = src.read(b, off, len)
+            if (r > 0) bytesRead += r
+            return r
+        }
+
+        override fun skip(n: Long): Long {
+            val s = src.skip(n)
+            if (s > 0) bytesRead += s
+            return s
+        }
+
+        override fun available(): Int = src.available()
+
+        override fun close() = src.close()
+    }
+
+    private fun writeEntry(
+        input: InputStream,
+        target: File,
+        onProgress: (() -> Unit)? = null,
+    ) {
         target.parentFile?.mkdirs()
         FileOutputStream(target).use { output ->
             val buf = ByteArray(64 * 1024)
@@ -380,6 +451,7 @@ object VoiceModelManager {
                 val n = input.read(buf)
                 if (n < 0) break
                 output.write(buf, 0, n)
+                onProgress?.invoke()
             }
         }
     }

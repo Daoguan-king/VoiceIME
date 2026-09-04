@@ -302,9 +302,35 @@ class VoiceImeService : InputMethodService() {
                 Log.i(TAG, "Only one IME enabled, skip switch back")
                 return
             }
-            val token = window?.window?.attributes?.token ?: return
-            val ok = imm.switchToLastInputMethod(token)
-            Log.i(TAG, "switchToLastInputMethod -> $ok")
+            // 切回目标候选：排除自己与语音型输入法（mode=voice），只考虑键盘输入法
+            val candidates = imm.enabledInputMethodList.filter { info ->
+                info.packageName != packageName &&
+                    (0 until info.subtypeCount).any { info.getSubtypeAt(it).mode.lowercase() != "voice" }
+            }
+            // 候选唯一 → 直接显式切换，完全不依赖系统"上一个输入法"记录。
+            // switchToLastInputMethod 依赖系统维护的 last-IME 记录，部分 ROM 上该记录
+            // 不可靠（指向自己或已失效的 subtype 时返回 false），会概率性切回失败；
+            // 显式切换（InputMethodService.switchInputMethod）不依赖该记录，结果确定。
+            if (candidates.size == 1) {
+                switchInputMethod(candidates[0].id)
+                AppLog.i(TAG, "switchInputMethod -> ${candidates[0].id}")
+                return
+            }
+            // 多个候选：先尝试系统记录的"上一个输入法"（最符合用户预期）
+            val token = window?.window?.attributes?.token
+            if (token != null && imm.switchToLastInputMethod(token)) {
+                AppLog.i(TAG, "switchToLastInputMethod -> true")
+                return
+            }
+            // 失败兜底：显式切回首选输入法（优先 Trime，其次第一个键盘输入法）
+            val fallback = candidates.firstOrNull { it.packageName.startsWith("com.osfans.trime") }
+                ?: candidates.firstOrNull()
+            if (fallback == null) {
+                AppLog.w(TAG, "No keyboard IME candidate to switch back, skip")
+                return
+            }
+            switchInputMethod(fallback.id)
+            AppLog.i(TAG, "fallback switchInputMethod -> ${fallback.id}")
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to switch back to previous IME", t)
         }
