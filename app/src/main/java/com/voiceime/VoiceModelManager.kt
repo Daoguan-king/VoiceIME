@@ -67,8 +67,7 @@ object VoiceModelManager {
             val rels = buildList {
                 add("models/${spec.dirName}")
                 if (spec.kind == ModelKind.SENSE_VOICE) {
-                    val variant = if (spec.id == AsrModels.SENSE_VOICE_FULL.id) "small-full" else "small-int8"
-                    add("models/sensevoice/$variant")
+                    add("models/sensevoice/${senseVoiceLegacyVariant(spec)}")
                     add("models/sensevoice")
                 }
             }
@@ -80,6 +79,10 @@ object VoiceModelManager {
         return null
     }
 
+    /** 旧版 SenseVoice 布局的 variant 子目录名（与旧版 flat 布局兼容） */
+    private fun senseVoiceLegacyVariant(spec: ModelSpec): String =
+        if (spec.id == AsrModels.SENSE_VOICE_FULL.id) "small-full" else "small-int8"
+
     /**
      * 删除模型文件以节省空间：清理新布局目录 + 兼容的旧 SenseVoice 布局目录。
      * 返回是否有任何目录被删除。已加载进内存的识别器不受影响，
@@ -89,8 +92,7 @@ object VoiceModelManager {
         val dirs = buildList {
             add(File(modelRoot(context), spec.dirName))
             if (spec.kind == ModelKind.SENSE_VOICE) {
-                val variant = if (spec.id == AsrModels.SENSE_VOICE_FULL.id) "small-full" else "small-int8"
-                add(File(File(modelRoot(context), "sensevoice"), variant))
+                add(File(File(modelRoot(context), "sensevoice"), senseVoiceLegacyVariant(spec)))
                 add(File(modelRoot(context), "sensevoice"))
             }
         }.distinct()
@@ -135,6 +137,9 @@ object VoiceModelManager {
      *
      * 幂等：明文文件、旧版误转文件（字节 token 编码成了字面 "<0xNN>"）、
      * 已正确的 base64 文件三种状态均可识别并只做必要的重写。
+     *
+     * 实现拆为三段：[parseTokenLines]（解析还原字节）→
+     * [toBase64Lines]（计算目标字节并序列化，无需重写时返回 null）→ 原子落盘。
      */
     fun ensureMoonshineBase64Tokens(dir: File) {
         try {
@@ -142,72 +147,11 @@ object VoiceModelManager {
             if (!f.isFile) return
             val lines = f.readLines().filter { it.isNotBlank() }
             if (lines.isEmpty()) return
-            val b64Chars = Regex("^[A-Za-z0-9+/]+={0,2}$")
-            val byteToken = Regex("^<0x([0-9A-Fa-f]{2})>$")
-            val decoder = java.util.Base64.getDecoder()
-            val encoder = java.util.Base64.getEncoder()
-
-            fun decodeB64(s: String): ByteArray? =
-                if (s.length % 4 == 0 && b64Chars.matches(s)) {
-                    try {
-                        decoder.decode(s)
-                    } catch (_: Throwable) {
-                        null
-                    }
-                } else {
-                    null
-                }
-
-            // 第一步：每行还原为 (id, 解码后的字节)；allBase64=false 说明是明文文件。
-            // 解析规则与 C++ ReadTokens 对齐：字段按空白分隔（多空格合法）；
-            // 单字段行是"空 token"约定（FunASR 风格，如 base-zh 词表的
-            // " 31353"，ReadTokens 解析为 " "，ApplyBase64Decode 再映射为 ""），
-            // 转换时保持空字节即可原样保留该行；三个以上字段 C++ 会直接
-            // exit，文件本身损坏，不做转换。
-            data class Entry(val id: String, val bytes: ByteArray)
-            val entries = mutableListOf<Entry>()
-            var allBase64 = true
-            for (line in lines) {
-                val parts = line.trim().split(' ').filter { it.isNotEmpty() }
-                when (parts.size) {
-                    1 -> entries.add(Entry(parts[0], ByteArray(0)))
-                    2 -> {
-                        val sym = parts[0]
-                        val decoded = decodeB64(sym)
-                        if (decoded == null) allBase64 = false
-                        entries.add(Entry(parts[1], decoded ?: sym.toByteArray(Charsets.UTF_8)))
-                    }
-                    else -> {
-                        AppLog.w(TAG, "tokens.txt has malformed lines, skip base64 conversion: ${dir.name}")
-                        return
-                    }
-                }
-            }
-
-            // 第二步：计算目标字节。解码后仍为字面 "<0xNN>"（明文残留或旧版误转）
-            // → 修正为原始单字节；明文 token → UTF-8 字节；正确 base64 → 保持
-            var needRewrite = false
-            val sb = StringBuilder(entries.size * 16)
-            for (e in entries) {
-                val text = String(e.bytes, Charsets.UTF_8)
-                val m = byteToken.find(text)
-                val target: ByteArray = when {
-                    m != null -> {
-                        needRewrite = true
-                        byteArrayOf(m.groupValues[1].toInt(16).toByte())
-                    }
-                    !allBase64 -> {
-                        needRewrite = true
-                        e.bytes
-                    }
-                    else -> e.bytes
-                }
-                sb.append(encoder.encodeToString(target)).append(' ').append(e.id).append('\n')
-            }
-            if (!needRewrite) return
+            val parsed = parseTokenLines(lines, dir.name) ?: return
+            val content = toBase64Lines(parsed) ?: return
             // 原子替换，避免转换中途留下残缺文件
             val tmp = File(dir, "tokens.txt.part")
-            tmp.writeText(sb.toString())
+            tmp.writeText(content)
             if (!tmp.renameTo(f)) {
                 tmp.copyTo(f, overwrite = true)
                 tmp.delete()
@@ -216,6 +160,84 @@ object VoiceModelManager {
         } catch (t: Throwable) {
             AppLog.w(TAG, "tokens.txt base64 conversion failed: " + (t.message ?: t.javaClass.simpleName))
         }
+    }
+
+    /** tokens.txt 单行解析结果：id 与 token 字节（base64 解码或明文 UTF-8） */
+    private data class TokenEntry(val id: String, val bytes: ByteArray)
+
+    /** [parseTokenLines] 的结果：全部行 + 是否本来就是全 base64 文件 */
+    private class ParsedTokens(val entries: List<TokenEntry>, val allBase64: Boolean)
+
+    private val b64Chars = Regex("^[A-Za-z0-9+/]+={0,2}$")
+    private val byteToken = Regex("^<0x([0-9A-Fa-f]{2})>$")
+
+    private fun decodeB64(s: String): ByteArray? =
+        if (s.length % 4 == 0 && b64Chars.matches(s)) {
+            try {
+                java.util.Base64.getDecoder().decode(s)
+            } catch (_: Throwable) {
+                null
+            }
+        } else {
+            null
+        }
+
+    /**
+     * 解析阶段：每行还原为 (id, 字节)；allBase64=false 说明是明文文件。
+     * 解析规则与 C++ ReadTokens 对齐：字段按空白分隔（多空格合法）；
+     * 单字段行是"空 token"约定（FunASR 风格，如 base-zh 词表的
+     * " 31353"，ReadTokens 解析为 " "，ApplyBase64Decode 再映射为 ""），
+     * 转换时保持空字节即可原样保留该行；三个以上字段 C++ 会直接
+     * exit，文件本身损坏，返回 null 不做转换（已写日志）。
+     */
+    private fun parseTokenLines(lines: List<String>, dirName: String): ParsedTokens? {
+        val entries = mutableListOf<TokenEntry>()
+        var allBase64 = true
+        for (line in lines) {
+            val parts = line.trim().split(' ').filter { it.isNotEmpty() }
+            when (parts.size) {
+                1 -> entries.add(TokenEntry(parts[0], ByteArray(0)))
+                2 -> {
+                    val sym = parts[0]
+                    val decoded = decodeB64(sym)
+                    if (decoded == null) allBase64 = false
+                    entries.add(TokenEntry(parts[1], decoded ?: sym.toByteArray(Charsets.UTF_8)))
+                }
+                else -> {
+                    AppLog.w(TAG, "tokens.txt has malformed lines, skip base64 conversion: $dirName")
+                    return null
+                }
+            }
+        }
+        return ParsedTokens(entries, allBase64)
+    }
+
+    /**
+     * 目标计算阶段：解码后仍为字面 "<0xNN>"（明文残留或旧版误转）
+     * → 修正为原始单字节；明文 token → UTF-8 字节；正确 base64 → 保持。
+     * 无需重写（已是正确 base64）时返回 null。
+     */
+    private fun toBase64Lines(parsed: ParsedTokens): String? {
+        val encoder = java.util.Base64.getEncoder()
+        var needRewrite = false
+        val sb = StringBuilder(parsed.entries.size * 16)
+        for (e in parsed.entries) {
+            val text = String(e.bytes, Charsets.UTF_8)
+            val m = byteToken.find(text)
+            val target: ByteArray = when {
+                m != null -> {
+                    needRewrite = true
+                    byteArrayOf(m.groupValues[1].toInt(16).toByte())
+                }
+                !parsed.allBase64 -> {
+                    needRewrite = true
+                    e.bytes
+                }
+                else -> e.bytes
+            }
+            sb.append(encoder.encodeToString(target)).append(' ').append(e.id).append('\n')
+        }
+        return if (needRewrite) sb.toString() else null
     }
 
     /**
@@ -244,8 +266,14 @@ object VoiceModelManager {
             }
             root.mkdirs()
 
-            // 路径 1：自定义源（压缩包）
-            val custom = customUrl?.takeIf { it.isNotBlank() }
+            // 路径 1：自定义源（压缩包）。仅接受 http(s)：自定义 URL 未限制协议时，
+            // file:/ftp: 等任意 scheme 都会被尝试，且 http:// 明文可被中间人替换模型权重
+            val custom = customUrl?.trim()?.takeIf { url ->
+                url.startsWith("https://") || url.startsWith("http://")
+            }
+            if (customUrl != null && custom == null) {
+                AppLog.w(TAG, "custom url ignored (only http/https supported): $customUrl")
+            }
             if (custom != null && tryArchiveSource(context, spec, root, custom)) {
                 return@withContext true
             }
@@ -569,11 +597,13 @@ object VoiceModelManager {
     private fun downloadFile(url: String, target: File, onProgress: (Long, Long) -> Unit): Boolean {
         target.parentFile?.mkdirs()
         val part = File(target.parentFile, target.name + ".part")
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.instanceFollowRedirects = true
-        connection.connectTimeout = 15_000
-        connection.readTimeout = 30_000
+        var connection: HttpURLConnection? = null
         try {
+            // 连接建立（URL 解析/DNS/connect）也在 try 内，避免异常逃逸出统一的失败处理
+            connection = URL(url).openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
             connection.connect()
             val code = connection.responseCode
             if (code !in 200..299) {
@@ -614,7 +644,7 @@ object VoiceModelManager {
             return false
         } finally {
             part.delete()
-            connection.disconnect()
+            connection?.disconnect()
         }
     }
 

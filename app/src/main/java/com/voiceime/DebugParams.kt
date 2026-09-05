@@ -1,7 +1,6 @@
 package com.voiceime
 
 import android.content.Context
-import android.content.SharedPreferences
 
 /**
  * 调试参数：VAD / 解码 / 流式相关可调参数，运行时修改、重新录音即生效。
@@ -35,11 +34,26 @@ object DebugParams {
         val previewIntervalMs: Long = 250L,
     )
 
-    private fun prefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
+    /**
+     * 字段单表（key/标签/类型/范围/取值）：
+     * readAll / saveAll / reset / 设置页字段列表全部由此生成。
+     */
+    val fields: List<ParamField<Values>> = listOf(
+        ParamField(K_VAD_THRESHOLD, R.string.dbg_vad_threshold, ParamType.FLOAT, 0.1, 0.9) { it.vadThreshold.toString() },
+        ParamField(K_VAD_MIN_SILENCE, R.string.dbg_min_silence, ParamType.FLOAT, 0.1, 2.0) { it.vadMinSilence.toString() },
+        ParamField(K_VAD_MIN_SPEECH, R.string.dbg_min_speech, ParamType.FLOAT, 0.1, 2.0) { it.vadMinSpeech.toString() },
+        ParamField(K_VAD_WINDOW, R.string.dbg_window, ParamType.INT, 256.0, 512.0) { it.vadWindowSize.toString() },
+        ParamField(K_VAD_MAX_SPEECH, R.string.dbg_max_speech, ParamType.FLOAT, 0.0, 60.0) { it.vadMaxSpeech.toString() },
+        ParamField(K_THREADS, R.string.dbg_threads, ParamType.INT, 1.0, 8.0) { it.decodeThreads.toString() },
+        ParamField(K_WORKERS, R.string.dbg_workers, ParamType.INT, 1.0, 8.0) { it.workers.toString() },
+        ParamField(K_AUTO_STOP_MS, R.string.dbg_auto_stop, ParamType.LONG, 200.0, 5_000.0) { it.autoStopMs.toString() },
+        ParamField(K_PREVIEW_CHARS, R.string.dbg_preview_chars, ParamType.INT, 32.0, 300.0) { it.previewChars.toString() },
+        ParamField(K_READ_CHUNK_MS, R.string.dbg_read_chunk, ParamType.INT, 16.0, 200.0) { it.readChunkMs.toString() },
+        ParamField(K_PREVIEW_INTERVAL_MS, R.string.dbg_preview_interval, ParamType.LONG, 50.0, 2_000.0) { it.previewIntervalMs.toString() },
+    )
 
     fun read(context: Context): Values {
-        val sp = prefs(context)
+        val sp = context.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
         return Values(
             vadThreshold = sp.getFloat(K_VAD_THRESHOLD, 0.5f),
             vadMinSilence = sp.getFloat(K_VAD_MIN_SILENCE, 0.25f),
@@ -56,114 +70,11 @@ object DebugParams {
     }
 
     /** 设置页展示用的全部参数（字符串形式） */
-    fun readAll(context: Context): Map<String, String> {
-        val v = read(context)
-        return linkedMapOf(
-            K_VAD_THRESHOLD to v.vadThreshold.toString(),
-            K_VAD_MIN_SILENCE to v.vadMinSilence.toString(),
-            K_VAD_MIN_SPEECH to v.vadMinSpeech.toString(),
-            K_VAD_WINDOW to v.vadWindowSize.toString(),
-            K_VAD_MAX_SPEECH to v.vadMaxSpeech.toString(),
-            K_THREADS to v.decodeThreads.toString(),
-            K_WORKERS to v.workers.toString(),
-            K_AUTO_STOP_MS to v.autoStopMs.toString(),
-            K_PREVIEW_CHARS to v.previewChars.toString(),
-            K_READ_CHUNK_MS to v.readChunkMs.toString(),
-            K_PREVIEW_INTERVAL_MS to v.previewIntervalMs.toString(),
-        )
-    }
+    fun readAll(context: Context): Map<String, String> = ParamStore.readAll(fields, read(context))
 
     /** 校验并保存。返回 null 表示成功，否则返回错误提示（已本地化）。 */
-    fun saveAll(context: Context, values: Map<String, String>): String? {
-        val editor = prefs(context).edit()
-        try {
-            putFloat(context, editor, K_VAD_THRESHOLD, values, R.string.dbg_vad_threshold, 0.1f, 0.9f)
-            putFloat(context, editor, K_VAD_MIN_SILENCE, values, R.string.dbg_min_silence, 0.1f, 2.0f)
-            putFloat(context, editor, K_VAD_MIN_SPEECH, values, R.string.dbg_min_speech, 0.1f, 2.0f)
-            putInt(context, editor, K_VAD_WINDOW, values, R.string.dbg_window, 256, 512)
-            putFloat(context, editor, K_VAD_MAX_SPEECH, values, R.string.dbg_max_speech, 0f, 60f)
-            putInt(context, editor, K_THREADS, values, R.string.dbg_threads, 1, 8)
-            putInt(context, editor, K_WORKERS, values, R.string.dbg_workers, 1, 8)
-            putLong(context, editor, K_AUTO_STOP_MS, values, R.string.dbg_auto_stop, 200L, 5_000L)
-            putInt(context, editor, K_PREVIEW_CHARS, values, R.string.dbg_preview_chars, 32, 300)
-            putInt(context, editor, K_READ_CHUNK_MS, values, R.string.dbg_read_chunk, 16, 200)
-            putLong(context, editor, K_PREVIEW_INTERVAL_MS, values, R.string.dbg_preview_interval, 50L, 2_000L)
-        } catch (e: IllegalArgumentException) {
-            return e.message
-        }
-        editor.apply()
-        return null
-    }
+    fun saveAll(context: Context, values: Map<String, String>): String? =
+        ParamStore.saveAll(context, fields, values)
 
-    fun reset(context: Context) {
-        prefs(context).edit()
-            .remove(K_VAD_THRESHOLD).remove(K_VAD_MIN_SILENCE).remove(K_VAD_MIN_SPEECH)
-            .remove(K_VAD_WINDOW).remove(K_VAD_MAX_SPEECH).remove(K_THREADS)
-            .remove(K_WORKERS).remove(K_AUTO_STOP_MS).remove(K_PREVIEW_CHARS)
-            .remove(K_READ_CHUNK_MS).remove(K_PREVIEW_INTERVAL_MS)
-            .apply()
-    }
-
-    private fun putFloat(
-        context: Context,
-        editor: SharedPreferences.Editor,
-        key: String,
-        values: Map<String, String>,
-        labelRes: Int,
-        min: Float,
-        max: Float,
-    ) {
-        val raw = values[key]?.trim().orEmpty()
-        val label = context.getString(labelRes)
-        val v = raw.toFloatOrNull()
-            ?: throw IllegalArgumentException(context.getString(R.string.dbg_err_number, label))
-        if (v < min || v > max) {
-            throw IllegalArgumentException(
-                context.getString(R.string.dbg_err_range, label, min.toString(), max.toString()),
-            )
-        }
-        editor.putFloat(key, v)
-    }
-
-    private fun putInt(
-        context: Context,
-        editor: SharedPreferences.Editor,
-        key: String,
-        values: Map<String, String>,
-        labelRes: Int,
-        min: Int,
-        max: Int,
-    ) {
-        val raw = values[key]?.trim().orEmpty()
-        val label = context.getString(labelRes)
-        val v = raw.toIntOrNull()
-            ?: throw IllegalArgumentException(context.getString(R.string.dbg_err_number, label))
-        if (v < min || v > max) {
-            throw IllegalArgumentException(
-                context.getString(R.string.dbg_err_range, label, min.toString(), max.toString()),
-            )
-        }
-        editor.putInt(key, v)
-    }
-
-    private fun putLong(
-        context: Context,
-        editor: SharedPreferences.Editor,
-        key: String,
-        values: Map<String, String>,
-        labelRes: Int,
-        min: Long,
-        max: Long,
-    ) {
-        val raw = values[key]?.trim().orEmpty()
-        val label = context.getString(labelRes)
-        val v = raw.toLongOrNull()
-            ?: throw IllegalArgumentException(context.getString(R.string.dbg_err_number, label))
-        if (v < min || v > max) {
-            throw IllegalArgumentException(
-                context.getString(R.string.dbg_err_range, label, min.toString(), max.toString()),
-            )
-        }
-        editor.putLong(key, v)
-    }
+    fun reset(context: Context) = ParamStore.reset(context, fields)
 }

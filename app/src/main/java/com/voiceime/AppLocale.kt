@@ -18,12 +18,19 @@ object AppLocale {
     const val ZH = "zh"
     const val EN = "en"
 
+    /** 语言在 SharedPreferences 的存储键（语言存储归本对象所有） */
+    private const val KEY_APP_LOCALE = "app_locale"
+
     val OPTIONS = listOf(FOLLOW_SYSTEM, ZH, EN)
 
-    fun current(context: Context): String = UiParams.appLocale(context)
+    private fun prefs(context: Context) =
+        context.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
+
+    fun current(context: Context): String =
+        prefs(context).getString(KEY_APP_LOCALE, FOLLOW_SYSTEM) ?: FOLLOW_SYSTEM
 
     fun set(context: Context, value: String) {
-        UiParams.setAppLocale(context, value)
+        prefs(context).edit().putString(KEY_APP_LOCALE, value).apply()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val lm = context.getSystemService(LocaleManager::class.java) ?: return
             // 仅切回"跟随系统"时同步系统侧（清空记录）；切到具体语言不调

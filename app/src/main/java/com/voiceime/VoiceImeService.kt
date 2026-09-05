@@ -5,11 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.os.Build
-import android.os.SystemClock
 import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
@@ -30,30 +26,26 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import com.k2fsa.sherpa.onnx.TenVadModelConfig
-import com.k2fsa.sherpa.onnx.Vad
-import com.k2fsa.sherpa.onnx.VadModelConfig
 import com.voiceime.ui.panel.PanelScreen
 import com.voiceime.ui.panel.PanelUiState
 import com.voiceime.ui.theme.VoiceImeTheme
-import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
  * 供 Trime 调用的本地语音输入法（sherpa-onnx SenseVoice）。
  *
- * 职责边界：本类只做录音采集、VAD 判停、识别器管理与 IME 生命周期/UI；
+ * 职责边界：本类只做 IME 生命周期/UI 接线与会话编排；
+ * 录音采集 + VAD 判停 + 电平回调在 [RecordingEngine]，
+ * 识别器缓存/延迟释放在 [RecognizerCache]，
  * 流式解码（段队列 + 并发 worker + 乱序重排 + 滑动窗口预览）在 [StreamingPipeline]。
  * UI 为 Compose 面板（Xime 同款接线：Service 实现三 Owner，ComposeView 作输入视图，
  * 录音线程经 [PanelUiState] StateFlow 推送状态）。
@@ -62,14 +54,6 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
 
     companion object {
         private const val TAG = "VoiceIme"
-        private const val SAMPLE_RATE = 16_000
-
-        /** 单次录音最长时长（5 分钟），防止内存无限增长 */
-        private const val MAX_SESSION_MS = 300_000L
-
-        // 时间分片降级参数（VAD 不可用时使用）
-        private const val PARTIAL_INTERVAL_MS = 700L
-        private const val MIN_SEGMENT_BYTES = 19_200
 
         /** 面板是否正在录音（应用内"输入法测试"互斥检测用，同进程可见） */
         @Volatile
@@ -118,12 +102,6 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
         updateLanguageLabel()
     }
 
-    /** 识别器创建/重建锁（解码本身不锁，支持并发解码） */
-    private val recognizerLock = Any()
-
-    // 在途解码计数已下沉到 VoiceRecognizer 实例级（inflightCount），
-    // 避免全局计数造成的误释放竞态与跨实例相互拖延
-
     /** 调试参数（每次录音开始时从设置读取） */
     private var debug = DebugParams.Values()
 
@@ -143,19 +121,9 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
     private var session = 0L
 
     private var recordJob: Job? = null
-    private var sessionStartMs = 0L
 
-    /** 整段复核用累积音频（仅最终解码读取，上限由 MAX_SESSION_MS 控制） */
-    private val pcmBuffer = ByteArrayOutputStream()
-    private val bufferLock = Any()
-
-    private var vad: Vad? = null
-    private var hasDetectedSpeech = false
-    private var lastSpeechAtMs = 0L
-
-    // 时间分片降级（VAD 不可用）用的游标
-    private var lastPartialByteOffset = 0
-    private var lastPartialAtMs = 0L
+    /** 识别器缓存（模型/语言/线程变化时重建，旧实例延迟释放防 JNI use-after-free） */
+    private val recognizerCache = RecognizerCache(TAG)
 
     /** 流式解码管线（段固化 + 滑动窗口预览） */
     private val pipeline = StreamingPipeline(
@@ -173,10 +141,6 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
     private var sessionModelDir: File? = null
     private var sessionModelId = ""
     private var sessionRecognizerKey = ""
-
-    /** 已加载的识别器（模型/语言变化时重建） */
-    private var recognizer: VoiceRecognizer? = null
-    private var recognizerKey = ""
 
     /** 底部手势条/虚拟按键安全区：固定 24dp + 系统 insets */
     private val bottomInsetBase: Int by lazy { dp(24) }
@@ -252,7 +216,7 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
             session++ // 使旧任务的收尾逻辑失效
         }
         recordJob?.cancel()
-        resetSessionState()
+        pipeline.reset()
         _panelState.update { it.copy(recording = false) }
     }
 
@@ -294,13 +258,11 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
         val mySession = ++session
         recordJob?.cancel()
         setRecording(true)
-        sessionStartMs = SystemClock.elapsedRealtime()
         AppLog.i(TAG, "recording session #$mySession, model: ${spec.id}, dir: ${modelDir.absolutePath}")
         sessionModelDir = modelDir
         sessionModelId = spec.id
-        sessionRecognizerKey = spec.id + "|" + modelDir.absolutePath + "|" + language + "|" + debug.decodeThreads.coerceIn(1, 8)
-        resetSessionState()
-        initVad()
+        sessionRecognizerKey = recognizerCache.buildKey(spec, modelDir, language, debug.decodeThreads)
+        pipeline.reset()
         _panelState.update {
             it.copy(
                 recording = true,
@@ -311,14 +273,26 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
 
         pipeline.onSessionStart()
 
+        // 本次会话的参数快照（协程内读取，避免与下一次 start 的字段赋值竞态）
+        val dbg = debug
+        val emotion = emotionEvent
         recordJob = scope.launch(Dispatchers.IO) {
+            // 引擎随协程创建/销毁（VAD 加载在 IO 线程），取消/异常均经 finally 释放
+            val engine = RecordingEngine(
+                tag = TAG,
+                debug = dbg,
+                assets = assets,
+                pipeline = pipeline,
+                onLevel = { level -> _panelState.update { it.copy(level = level) } },
+                onStopRequest = { setRecording(false) },
+            )
             try {
-                val pcm = recordAudio()
+                val pcm = engine.recordLoop(isRunning = { recording })
                 if (pcm.isEmpty() || session != mySession) return@launch
                 withContext(Dispatchers.Main) { setStatus(getString(R.string.status_recognizing)) }
-                val samples = pcmToFloatArray(pcm)
+                val samples = AudioCodec.pcmToFloat(pcm)
                 val result = decode(samples)
-                val text = if (emotionEvent && result.text.isNotBlank()) {
+                val text = if (emotion && result.text.isNotBlank()) {
                     result.text + EmotionEvent.format(result.emotion, result.event)
                 } else {
                     result.text
@@ -335,14 +309,12 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
                 AppLog.e(TAG, "recognition failed: " + (t.message ?: t.javaClass.simpleName))
                 withContext(Dispatchers.Main) { setStatus(t.message ?: "error") }
             } finally {
+                engine.close()
                 if (session == mySession) {
                     setRecording(false)
-                    resetSessionState()
-                    releaseVad()
+                    pipeline.reset()
                     // 面板状态复位（StateFlow 线程安全，无需切主线程）
-                    if (session == mySession) {
-                        _panelState.update { it.copy(recording = false) }
-                    }
+                    _panelState.update { it.copy(recording = false) }
                 }
             }
         }
@@ -427,109 +399,6 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
         _panelState.update { it.copy(languageLabel = labels[idx]) }
     }
 
-    // ---------------- VAD 与流式入口 ----------------
-
-    private fun initVad() {
-        releaseVad()
-        vad = try {
-            val tenConfig = TenVadModelConfig(
-                model = "vad/ten-vad.onnx",
-                threshold = debug.vadThreshold,
-                minSilenceDuration = debug.vadMinSilence,
-                minSpeechDuration = debug.vadMinSpeech,
-                windowSize = debug.vadWindowSize,
-                maxSpeechDuration = debug.vadMaxSpeech,
-            )
-            val config = VadModelConfig(
-                tenVadModelConfig = tenConfig,
-                sampleRate = SAMPLE_RATE,
-                numThreads = 1,
-                provider = "cpu",
-                debug = false,
-            )
-            Vad(assetManager = assets, config = config)
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "VAD init failed, fallback to time-based partial", t)
-            null
-        }
-    }
-
-    private fun releaseVad() {
-        try {
-            vad?.release()
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "Failed to release VAD", t)
-        }
-        vad = null
-    }
-
-    private fun resetSessionState() {
-        pipeline.reset()
-        synchronized(bufferLock) {
-            pcmBuffer.reset()
-        }
-        hasDetectedSpeech = false
-        lastSpeechAtMs = 0L
-    }
-
-    /**
-     * 每块 PCM 送入 VAD：
-     * 1. 音频累积进 pipeline 滑动窗口，首次检测到语音记录回退 0.4s 起点；
-     * 2. 连续静音超过阈值 → 自动结束录音；
-     * 3. VAD 出段 → pipeline 入队并发解码固化一行。
-     */
-    private fun processAudioChunk(samples: FloatArray, raw: ByteArray, rawLen: Int) {
-        val vad = vad
-        if (vad == null) {
-            maybePartialTimeBased()
-            return
-        }
-        try {
-            vad.acceptWaveform(samples)
-            pipeline.onChunkPcm(raw, rawLen)
-            val now = SystemClock.elapsedRealtime()
-            if (vad.isSpeechDetected()) {
-                hasDetectedSpeech = true
-                lastSpeechAtMs = now
-                pipeline.onSpeechDetected()
-            } else if (hasDetectedSpeech && now - lastSpeechAtMs >= debug.autoStopMs) {
-                // 静音自动结束
-                AppLog.i(TAG, "auto stop on silence timeout")
-                setRecording(false)
-                return
-            }
-            // 出队已完成的语音段 → 固化一行
-            while (!vad.empty()) {
-                val seg = vad.front()
-                val segSamples = seg.samples
-                vad.pop()
-                AppLog.i(TAG, "VAD segment: ${segSamples.size} samples")
-                pipeline.onSegmentCompleted(segSamples)
-            }
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "VAD processing failed", t)
-        }
-    }
-
-    /** 降级方案：按时间分片做预览（VAD 不可用时） */
-    private fun maybePartialTimeBased() {
-        val now = SystemClock.elapsedRealtime()
-        val segment: ByteArray? = synchronized(bufferLock) {
-            val total = pcmBuffer.size()
-            val pending = total - lastPartialByteOffset
-            if (now - lastPartialAtMs >= PARTIAL_INTERVAL_MS && pending >= MIN_SEGMENT_BYTES) {
-                val seg = pcmBuffer.toByteArray().copyOfRange(lastPartialByteOffset, total)
-                lastPartialByteOffset = total
-                lastPartialAtMs = now
-                seg
-            } else {
-                null
-            }
-        }
-        val seg = segment ?: return
-        pipeline.onSegmentCompleted(pcmToFloatArray(seg))
-    }
-
     /** pipeline 预览回调（任意线程触发，转主线程刷新 UI） */
     private fun onPipelinePreview(fixed: List<String>, preview: String) {
         val jobSession = session
@@ -555,131 +424,24 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
         }
     }
 
-    // ---------------- 录音：16 kHz / 单声道 / PCM16 ----------------
-
-    private suspend fun recordAudio(): ByteArray {
-        val minBuf = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
-        if (minBuf <= 0) {
-            AppLog.e(TAG, "AudioRecord.getMinBufferSize invalid: $minBuf")
-            return ByteArray(0)
-        }
-        // 读取粒度可调（官方 Demo 为 32ms/512 samples），越小 VAD 响应越快
-        val bufferSize = maxOf(minBuf, SAMPLE_RATE / 1000 * debug.readChunkMs * 2)
-        val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize,
-        )
-        if (record.state != AudioRecord.STATE_INITIALIZED) {
-            AppLog.e(TAG, "AudioRecord init failed")
-            record.release()
-            return ByteArray(0)
-        }
-        val buf = ByteArray(bufferSize)
-        try {
-            record.startRecording()
-            while (recording && currentCoroutineContext().isActive) {
-                // 单次录音时长上限，防止内存无限增长
-                if (SystemClock.elapsedRealtime() - sessionStartMs > MAX_SESSION_MS) {
-                    AppLog.i(TAG, "max session duration reached, auto stop")
-                    setRecording(false)
-                    break
-                }
-                val n = record.read(buf, 0, buf.size)
-                when {
-                    n > 0 -> {
-                        synchronized(bufferLock) { pcmBuffer.write(buf, 0, n) }
-                        val samples = pcmToFloatArray(buf, 0, n)
-                        _panelState.update { it.copy(level = rmsLevel(samples)) }
-                        processAudioChunk(samples, buf, n)
-                    }
-                    n < 0 -> break
-                }
-            }
-        } finally {
-            try {
-                record.stop()
-            } catch (_: Throwable) {
-                // 已停止
-            }
-            record.release()
-        }
-        return synchronized(bufferLock) { pcmBuffer.toByteArray() }
-    }
-
-    // ---- PCM -> Float ----
-
-    private fun pcmToFloatArray(pcm: ByteArray, offset: Int = 0, len: Int = pcm.size): FloatArray {
-        val n = len / 2
-        val out = FloatArray(n)
-        var i = 0
-        var pos = offset
-        while (i < n) {
-            val s = (pcm[pos + 1].toInt() shl 8) or (pcm[pos].toInt() and 0xFF)
-            var f = s / 32768.0f
-            if (f > 1f) f = 1f else if (f < -1f) f = -1f
-            out[i] = f
-            i++
-            pos += 2
-        }
-        return out
-    }
-
-    // ---- 音量电平（供 LevelView 动画） ----
-
-    /** 计算一段采样 RMS 并映射到 0..1（-50dB ~ 0dB） */
-    private fun rmsLevel(samples: FloatArray): Float {
-        if (samples.isEmpty()) return 0f
-        var sum = 0.0
-        for (s in samples) sum += s * s
-        val rms = Math.sqrt(sum / samples.size)
-        val db = 20.0 * Math.log10(rms.coerceAtLeast(1e-6))
-        return ((db + 50.0) / 50.0).toFloat().coerceIn(0f, 1f)
-    }
-
     // ---- 识别 ----
 
     /**
      * 解码：不串行（与官方 Demo 一致，同一识别器可并发解码多个语音段）。
-     * 识别器创建/重建用 recognizerLock 保护；重建时旧实例延迟释放，避免 JNI use-after-free。
+     * 识别器创建/重建/延迟释放由 [RecognizerCache] 统一管理。
      */
     private fun decode(samples: FloatArray): DecodeResult {
-        val key = sessionRecognizerKey
-        val rec = synchronized(recognizerLock) {
-            val current = if (recognizerKey == key && recognizer != null) {
-                recognizer
-            } else {
-                val modelDir = sessionModelDir ?: return DecodeResult("")
-                val spec = AsrModels.byId(sessionModelId) ?: return DecodeResult("")
-                val old = recognizer
-                VoiceRecognizer(
-                    modelDir = modelDir,
-                    spec = spec,
-                    language = language,
-                    useItn = true,
-                    numThreads = debug.decodeThreads.coerceIn(1, 8),
-                ).also {
-                    recognizer = it
-                    recognizerKey = key
-                }.let { new ->
-                    // 锁内调用 releaseLater：此时本线程尚未登记在途解码，
-                    // 但 releaseLater 只检查 old 实例自己的计数，不会误释放 new
-                    old?.let { releaseLater(it) }
-                    new
-                }
-            }
-            // 关键：在锁内登记在途解码，避免 releaseLater 看到计数为 0 而提前 release
-            current?.beginDecode()
-            current
-        } ?: return DecodeResult("")
+        val modelDir = sessionModelDir ?: return DecodeResult("")
+        val spec = AsrModels.byId(sessionModelId) ?: return DecodeResult("")
+        val rec = recognizerCache.acquire(
+            newKey = sessionRecognizerKey,
+            modelDir = modelDir,
+            spec = spec,
+            language = language,
+            numThreads = debug.decodeThreads,
+        ) ?: return DecodeResult("")
         try {
-            return rec.decode(samples, SAMPLE_RATE)
+            return rec.decode(samples, AudioCodec.SAMPLE_RATE)
         } finally {
             rec.endDecode()
         }
@@ -687,26 +449,6 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
 
     /** 流式预览只需文本（情感/事件标签只在整段上屏时附加） */
     private fun decodeText(samples: FloatArray): String = decode(samples).text
-
-    /** 旧识别器延迟释放：等它自己实例的在途解码全部结束后再 release（须在锁内调用） */
-    private fun releaseLater(old: VoiceRecognizer) {
-        if (old.inflightCount() == 0) {
-            old.release()
-            return
-        }
-        // 用独立守护线程等待，不随 scope 取消——否则 Service 销毁/切换模型时
-        // 协程被取消，旧识别器永不释放（原生内存泄漏）
-        Thread {
-            try {
-                while (old.inflightCount() > 0) {
-                    Thread.sleep(50)
-                }
-                old.release()
-            } catch (t: Throwable) {
-                AppLog.w(TAG, "Failed to release old recognizer", t)
-            }
-        }.apply { isDaemon = true }.start()
-    }
 
     override fun onDestroy() {
         AppLog.i(TAG, "onDestroy")
@@ -717,11 +459,7 @@ class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistry
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         scope.cancel()
         // 释放当前识别器（若有在途解码则等待其结束，避免 JNI use-after-free）
-        synchronized(recognizerLock) {
-            recognizer?.let { releaseLater(it) }
-            recognizer = null
-            recognizerKey = ""
-        }
+        recognizerCache.releaseAll()
         serviceViewModelStore.clear()
     }
 

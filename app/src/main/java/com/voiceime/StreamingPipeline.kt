@@ -90,7 +90,7 @@ class StreamingPipeline(
                     if (snapshot == null) continue
                     lastPreviewAtMs = now
                     try {
-                        val text = decode(pcmToFloat(snapshot))
+                        val text = decode(AudioCodec.pcmToFloat(snapshot))
                         if (sessionProvider() == jobSession) {
                             val t = text.trim()
                             if (t.isNotEmpty()) {
@@ -255,22 +255,5 @@ class StreamingPipeline(
         val fixed: List<String>
         synchronized(lock) { fixed = fixedLines.toList() }
         onPreview(fixed, lastPreviewText)
-    }
-
-    private fun pcmToFloat(pcm: ByteArray): FloatArray {
-        if (pcm.isEmpty()) return FloatArray(0)
-        val n = pcm.size / 2
-        val out = FloatArray(n)
-        var i = 0
-        var pos = 0
-        while (i < n) {
-            val s = (pcm[pos + 1].toInt() shl 8) or (pcm[pos].toInt() and 0xFF)
-            var f = s / 32768.0f
-            if (f > 1f) f = 1f else if (f < -1f) f = -1f
-            out[i] = f
-            i++
-            pos += 2
-        }
-        return out
     }
 }

@@ -82,20 +82,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     val animFields = UiParams.animFields
 
-    /** 调试参数字段定义：key → (标签, 是否小数) */
-    val debugFields: List<Triple<String, Int, Boolean>> = listOf(
-        Triple(DebugParams.K_VAD_THRESHOLD, R.string.dbg_vad_threshold, true),
-        Triple(DebugParams.K_VAD_MIN_SILENCE, R.string.dbg_min_silence, true),
-        Triple(DebugParams.K_VAD_MIN_SPEECH, R.string.dbg_min_speech, true),
-        Triple(DebugParams.K_VAD_WINDOW, R.string.dbg_window, false),
-        Triple(DebugParams.K_VAD_MAX_SPEECH, R.string.dbg_max_speech, true),
-        Triple(DebugParams.K_THREADS, R.string.dbg_threads, false),
-        Triple(DebugParams.K_WORKERS, R.string.dbg_workers, false),
-        Triple(DebugParams.K_AUTO_STOP_MS, R.string.dbg_auto_stop, false),
-        Triple(DebugParams.K_PREVIEW_CHARS, R.string.dbg_preview_chars, false),
-        Triple(DebugParams.K_READ_CHUNK_MS, R.string.dbg_read_chunk, false),
-        Triple(DebugParams.K_PREVIEW_INTERVAL_MS, R.string.dbg_preview_interval, false),
-    )
+    /** 调试参数字段定义（由 [DebugParams.fields] 单表生成，避免三处各写一遍） */
+    val debugFields: List<Triple<String, Int, Boolean>> =
+        DebugParams.fields.map { Triple(it.key, it.labelRes, it.decimal) }
 
     private val languageLabels: List<String> =
         context.resources.getStringArray(R.array.language_labels).toList()
@@ -128,7 +117,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         debugValues = DebugParams.readAll(context)
         levelAnimation = UiParams.levelAnimation(context)
         dynamicColor = UiParams.dynamicColor(context)
-        appLocaleIndex = AppLocale.OPTIONS.indexOf(UiParams.appLocale(context)).coerceAtLeast(0)
+        appLocaleIndex = AppLocale.OPTIONS.indexOf(AppLocale.current(context)).coerceAtLeast(0)
         animValues = UiParams.readAnimAll(context)
         refresh()
     }
@@ -268,7 +257,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         if (err == null) {
             toast(R.string.ui_anim_saved)
         } else {
-            toast(context.getString(R.string.debug_save_failed, err))
+            // 此前误用 debug_save_failed（复制粘贴遗留），改用界面参数自己的文案
+            toast(context.getString(R.string.ui_save_failed, err))
         }
         animValues = UiParams.readAnimAll(context)
     }

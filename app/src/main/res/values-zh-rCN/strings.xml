@@ -127,6 +127,7 @@
     <string name="label_app_language">应用语言</string>
     <string name="ui_anim_params_title">电平条动画参数</string>
     <string name="ui_anim_saved">已保存，面板立即生效</string>
+    <string name="ui_save_failed">保存失败：%1$s</string>
     <string name="ui_anim_reset_done">动画参数已恢复默认</string>
     <string name="ui_phase_cycle_ms">相位周期 ms（200~3000）</string>
     <string name="ui_wave_speed">波速（0.2~8）</string>

@@ -56,6 +56,11 @@ android {
         compose = true
     }
 
+    testOptions {
+        // JVM 单测中 android.util.Log / SystemClock 等仅打日志/计时的调用返回默认值（不抛异常）
+        unitTests.isReturnDefaultValues = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -88,4 +93,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.savedstate:savedstate-ktx:1.2.1")
+
+    // JVM 单元测试（此前 0 测试，先为纯逻辑补防护网）
+    testImplementation("junit:junit:4.13.2")
 }

@@ -127,6 +127,7 @@
     <string name="label_app_language">App language</string>
     <string name="ui_anim_params_title">Level bar animation params</string>
     <string name="ui_anim_saved">Saved, applies to the panel immediately</string>
+    <string name="ui_save_failed">Save failed: %1$s</string>
     <string name="ui_anim_reset_done">Animation defaults restored</string>
     <string name="ui_phase_cycle_ms">Phase cycle ms (200~3000)</string>
     <string name="ui_wave_speed">Wave speed (0.2~8)</string>
