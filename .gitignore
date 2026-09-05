@@ -2,6 +2,7 @@
 .gradle/
 build/
 app/build/
+build-output/
 .kotlin/
 
 # IDE
