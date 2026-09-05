@@ -83,7 +83,7 @@ object AppLog {
         replayFromDisk()
         installCrashHandler()
         startWriter()
-        i(TAG, "──── 进程启动（崩溃捕获已安装）────")
+        i(TAG, "──── process start (crash handler installed) ────")
     }
 
     fun i(tag: String, msg: String) = log(LogLevel.INFO, tag, msg)

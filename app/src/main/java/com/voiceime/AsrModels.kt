@@ -5,18 +5,19 @@ package com.voiceime
  *
  * 新增模型：在 [AsrModels.all] 加一个 [ModelSpec]，并在 [VoiceRecognizer] 的 when
  * 里补充对应的 OfflineModelConfig 配置。
+ * 名称/简介必须走字符串资源（labelRes/summaryRes，双语维护）。
  *
  * 下载源顺序（见 VoiceModelManager.downloadModel）：
  *   自定义 URL → [ModelSource] 逐文件镜像（hf-mirror / modelscope，无需解压）→ 官方压缩包
  *
  * 模型目录布局：/Android/data/<pkg>/files/models/<dirName>/
  */
-enum class ModelFamily(val label: String) {
-    SENSE_VOICE("SenseVoice"),
-    QWEN3_ASR("Qwen3-ASR"),
-    MOONSHINE("Moonshine"),
-    PARA_FORMER("Paraformer"),
-    ZIPFORMER("Zipformer"),
+enum class ModelFamily(val labelRes: Int) {
+    SENSE_VOICE(R.string.family_sense_voice),
+    QWEN3_ASR(R.string.family_qwen3),
+    MOONSHINE(R.string.family_moonshine),
+    PARA_FORMER(R.string.family_paraformer),
+    ZIPFORMER(R.string.family_zipformer),
 }
 
 /** 识别器构建类型（决定 OfflineModelConfig 的配置分支） */
@@ -53,10 +54,10 @@ data class ModelSource(
 data class ModelSpec(
     /** 唯一 id，持久化到 SharedPreferences */
     val id: String,
-    /** 第二段下拉显示名 */
-    val label: String,
-    /** 一句话介绍（大小/语言/特点），显示在模型下拉下方 */
-    val summary: String,
+    /** 第二段下拉显示名（字符串资源） */
+    val labelRes: Int,
+    /** 一句话介绍（大小/语言/特点，字符串资源） */
+    val summaryRes: Int,
     /** 第一段类型 */
     val family: ModelFamily,
     /** 识别器构建类型 */
@@ -108,8 +109,8 @@ object AsrModels {
 
     val SENSE_VOICE_INT8 = ModelSpec(
         id = DEFAULT_ID,
-        label = "small（int8）",
-        summary = "约 170 MB · 中/英/日/韩/粤 · 推荐",
+        labelRes = R.string.model_sensevoice_int8_label,
+        summaryRes = R.string.model_sensevoice_int8_summary,
         family = ModelFamily.SENSE_VOICE,
         kind = ModelKind.SENSE_VOICE,
         dirName = "sensevoice-int8",
@@ -132,8 +133,8 @@ object AsrModels {
 
     val SENSE_VOICE_FULL = ModelSpec(
         id = "sensevoice-full",
-        label = "small（fp32）",
-        summary = "约 900 MB · 精度更高 · 慎选",
+        labelRes = R.string.model_sensevoice_full_label,
+        summaryRes = R.string.model_sensevoice_full_summary,
         family = ModelFamily.SENSE_VOICE,
         kind = ModelKind.SENSE_VOICE,
         dirName = "sensevoice-full",
@@ -155,8 +156,8 @@ object AsrModels {
 
     val SENSE_VOICE_INT8_2025 = ModelSpec(
         id = "sensevoice-int8-2025",
-        label = "small 粤语（int8，WSYue）",
-        summary = "约 170 MB · 粤语特化（ASLP-lab/WSYue-ASR，架构同 SenseVoice）· 无情感/事件",
+        labelRes = R.string.model_sensevoice_2025_label,
+        summaryRes = R.string.model_sensevoice_2025_summary,
         family = ModelFamily.SENSE_VOICE,
         kind = ModelKind.SENSE_VOICE,
         dirName = "sensevoice-int8-2025",
@@ -180,8 +181,8 @@ object AsrModels {
 
     val QWEN3_ASR_INT8 = ModelSpec(
         id = "qwen3-asr-int8",
-        label = "0.6B（int8）",
-        summary = "约 1 GB · 中英 · 实验性更强识别",
+        labelRes = R.string.model_qwen3_label,
+        summaryRes = R.string.model_qwen3_summary,
         family = ModelFamily.QWEN3_ASR,
         kind = ModelKind.QWEN3_ASR,
         dirName = "qwen3-asr-int8",
@@ -208,121 +209,136 @@ object AsrModels {
     // ---------------- Moonshine ----------------
 
     /** v1 共 4 个 onnx + tokens */
-    private fun moonshineV1(id: String, label: String, summary: String, modelDir: String, bytes: Long) =
-        ModelSpec(
-            id = id,
-            label = label,
-            summary = summary,
-            family = ModelFamily.MOONSHINE,
-            kind = ModelKind.MOONSHINE_V1,
-            dirName = id,
-            files = listOf(
-                "tokens.txt",
-                "preprocess.onnx",
-                "encode.int8.onnx",
-                "uncached_decode.int8.onnx",
-                "cached_decode.int8.onnx",
-            ),
-            archiveUrl = GH_ASR + modelDir + ".tar.bz2",
-            sources = listOf(
-                hfSource(
-                    modelDir,
-                    listOf(
-                        "tokens.txt",
-                        "preprocess.onnx",
-                        "encode.int8.onnx",
-                        "uncached_decode.int8.onnx",
-                        "cached_decode.int8.onnx",
-                    ),
+    private fun moonshineV1(
+        id: String,
+        labelRes: Int,
+        summaryRes: Int,
+        modelDir: String,
+        bytes: Long,
+    ) = ModelSpec(
+        id = id,
+        labelRes = labelRes,
+        summaryRes = summaryRes,
+        family = ModelFamily.MOONSHINE,
+        kind = ModelKind.MOONSHINE_V1,
+        dirName = id,
+        files = listOf(
+            "tokens.txt",
+            "preprocess.onnx",
+            "encode.int8.onnx",
+            "uncached_decode.int8.onnx",
+            "cached_decode.int8.onnx",
+        ),
+        archiveUrl = GH_ASR + modelDir + ".tar.bz2",
+        sources = listOf(
+            hfSource(
+                modelDir,
+                listOf(
+                    "tokens.txt",
+                    "preprocess.onnx",
+                    "encode.int8.onnx",
+                    "uncached_decode.int8.onnx",
+                    "cached_decode.int8.onnx",
                 ),
             ),
-            requiredBytes = bytes,
-            supportsLanguage = false,
-        )
+        ),
+        requiredBytes = bytes,
+        supportsLanguage = false,
+    )
 
     /** v2 量化（.ort）共 2 个模型 + tokens */
-    private fun moonshineV2(id: String, label: String, summary: String, modelDir: String, bytes: Long) =
-        ModelSpec(
-            id = id,
-            label = label,
-            summary = summary,
-            family = ModelFamily.MOONSHINE,
-            kind = ModelKind.MOONSHINE_V2,
-            dirName = id,
-            files = listOf("tokens.txt", "encoder_model.ort", "decoder_model_merged.ort"),
-            archiveUrl = GH_ASR + modelDir + ".tar.bz2",
-            sources = listOf(
-                hfSource(
-                    modelDir,
-                    listOf("tokens.txt", "encoder_model.ort", "decoder_model_merged.ort"),
-                ),
+    private fun moonshineV2(
+        id: String,
+        labelRes: Int,
+        summaryRes: Int,
+        modelDir: String,
+        bytes: Long,
+    ) = ModelSpec(
+        id = id,
+        labelRes = labelRes,
+        summaryRes = summaryRes,
+        family = ModelFamily.MOONSHINE,
+        kind = ModelKind.MOONSHINE_V2,
+        dirName = id,
+        files = listOf("tokens.txt", "encoder_model.ort", "decoder_model_merged.ort"),
+        archiveUrl = GH_ASR + modelDir + ".tar.bz2",
+        sources = listOf(
+            hfSource(
+                modelDir,
+                listOf("tokens.txt", "encoder_model.ort", "decoder_model_merged.ort"),
             ),
-            requiredBytes = bytes,
-            supportsLanguage = false,
-        )
+        ),
+        requiredBytes = bytes,
+        supportsLanguage = false,
+    )
 
     val MOONSHINE_TINY_EN = moonshineV1(
-        "moonshine-tiny-en", "tiny（英文 int8）", "约 150 MB · 英文",
+        "moonshine-tiny-en", R.string.model_moonshine_tiny_en_label, R.string.model_moonshine_tiny_en_summary,
         "sherpa-onnx-moonshine-tiny-en-int8", 500L * 1024 * 1024,
     )
 
     val MOONSHINE_BASE_EN = moonshineV1(
-        "moonshine-base-en", "base（英文 int8）", "约 300 MB · 英文，更准",
+        "moonshine-base-en", R.string.model_moonshine_base_en_label, R.string.model_moonshine_base_en_summary,
         "sherpa-onnx-moonshine-base-en-int8", 800L * 1024 * 1024,
     )
 
     val MOONSHINE_TINY_KO = moonshineV2(
-        "moonshine-tiny-ko", "tiny（韩文量化）", "约 60 MB · 韩文",
+        "moonshine-tiny-ko", R.string.model_moonshine_tiny_ko_label, R.string.model_moonshine_tiny_ko_summary,
         "sherpa-onnx-moonshine-tiny-ko-quantized-2026-02-27", 300L * 1024 * 1024,
     )
 
     val MOONSHINE_TINY_JA = moonshineV2(
-        "moonshine-tiny-ja", "tiny（日文量化）", "约 60 MB · 日文",
+        "moonshine-tiny-ja", R.string.model_moonshine_tiny_ja_label, R.string.model_moonshine_tiny_ja_summary,
         "sherpa-onnx-moonshine-tiny-ja-quantized-2026-02-27", 300L * 1024 * 1024,
     )
 
     val MOONSHINE_BASE_ZH = moonshineV2(
-        "moonshine-base-zh", "base（中文量化）", "约 120 MB · 中文",
+        "moonshine-base-zh", R.string.model_moonshine_base_zh_label, R.string.model_moonshine_base_zh_summary,
         "sherpa-onnx-moonshine-base-zh-quantized-2026-02-27", 400L * 1024 * 1024,
     )
 
     /** 魔搭社区（ModelScope）镜像：manyeyes 导出的 Moonshine onnx（int8） */
-    private fun moonshineMsc(id: String, label: String, summary: String, ownerRepo: String, bytes: Long) =
-        ModelSpec(
-            id = id,
-            label = label,
-            summary = summary,
-            family = ModelFamily.MOONSHINE,
-            kind = ModelKind.MOONSHINE_V2,
-            dirName = id,
-            files = listOf(
-                "tokens.txt",
-                "encoder_model.int8.onnx",
-                "decoder_model_merged.int8.onnx",
-            ),
-            // 魔搭特有模型：无官方压缩包，直接走 modelscope 逐文件源
-            sources = listOf(
-                ModelSource(
-                    "modelscope",
-                    "https://www.modelscope.cn/models/" + ownerRepo + "/resolve/master/",
-                    listOf(
-                        "tokens.txt",
-                        "encoder_model.int8.onnx",
-                        "decoder_model_merged.int8.onnx",
-                    ),
+    private fun moonshineMsc(
+        id: String,
+        labelRes: Int,
+        summaryRes: Int,
+        ownerRepo: String,
+        bytes: Long,
+    ) = ModelSpec(
+        id = id,
+        labelRes = labelRes,
+        summaryRes = summaryRes,
+        family = ModelFamily.MOONSHINE,
+        kind = ModelKind.MOONSHINE_V2,
+        dirName = id,
+        files = listOf(
+            "tokens.txt",
+            "encoder_model.int8.onnx",
+            "decoder_model_merged.int8.onnx",
+        ),
+        // 魔搭特有模型：无官方压缩包，直接走 modelscope 逐文件源
+        sources = listOf(
+            ModelSource(
+                "modelscope",
+                "https://www.modelscope.cn/models/" + ownerRepo + "/resolve/master/",
+                listOf(
+                    "tokens.txt",
+                    "encoder_model.int8.onnx",
+                    "decoder_model_merged.int8.onnx",
                 ),
             ),
-            requiredBytes = bytes,
-            supportsLanguage = false,
-        )
+        ),
+        requiredBytes = bytes,
+        supportsLanguage = false,
+    )
 
     val MOONSHINE_TINY_ZH_MSC = moonshineMsc(
-        "moonshine-tiny-zh-msc", "tiny（中文 int8，魔搭）", "约 30 MB · 中文 · 魔搭社区",
+        "moonshine-tiny-zh-msc", R.string.model_moonshine_tiny_zh_msc_label, R.string.model_moonshine_tiny_zh_msc_summary,
         "manyeyes/moonshine-tiny-zh-int8-onnx", 200L * 1024 * 1024,
     )
 
     val MOONSHINE_BASE_ZH_MSC = moonshineMsc(
-        "moonshine-base-zh-msc", "base（中文 int8，魔搭）", "约 100 MB · 中文 · 魔搭社区",
+        "moonshine-base-zh-msc", R.string.model_moonshine_base_zh_msc_label, R.string.model_moonshine_base_zh_msc_summary,
         "manyeyes/moonshine-base-zh-int8-onnx", 400L * 1024 * 1024,
     )
 
@@ -330,8 +346,8 @@ object AsrModels {
 
     val PARA_FORMER_ZH = ModelSpec(
         id = "paraformer-zh",
-        label = "中文（int8）",
-        summary = "约 60 MB · 轻量中文 · 快",
+        labelRes = R.string.model_paraformer_zh_label,
+        summaryRes = R.string.model_paraformer_zh_summary,
         family = ModelFamily.PARA_FORMER,
         kind = ModelKind.PARA_FORMER,
         dirName = "paraformer-zh",
@@ -349,8 +365,8 @@ object AsrModels {
 
     val PARA_FORMER_ZH_SMALL = ModelSpec(
         id = "paraformer-zh-small",
-        label = "中文 small（int8）",
-        summary = "约 30 MB · 更小更快，精度略低",
+        labelRes = R.string.model_paraformer_zh_small_label,
+        summaryRes = R.string.model_paraformer_zh_small_summary,
         family = ModelFamily.PARA_FORMER,
         kind = ModelKind.PARA_FORMER,
         dirName = "paraformer-zh-small",
@@ -370,8 +386,8 @@ object AsrModels {
 
     private fun zipformer(
         id: String,
-        label: String,
-        summary: String,
+        labelRes: Int,
+        summaryRes: Int,
         modelDir: String,
         enc: String,
         dec: String,
@@ -379,8 +395,8 @@ object AsrModels {
         bytes: Long,
     ) = ModelSpec(
         id = id,
-        label = label,
-        summary = summary,
+        labelRes = labelRes,
+        summaryRes = summaryRes,
         family = ModelFamily.ZIPFORMER,
         kind = ModelKind.ZIPFORMER_TRANSDUCER,
         dirName = id,
@@ -394,7 +410,7 @@ object AsrModels {
     )
 
     val ZIPFORMER_ZH_EN = zipformer(
-        "zipformer-zh-en", "中英（int8）", "约 200 MB · 中英混合",
+        "zipformer-zh-en", R.string.model_zipformer_zh_en_label, R.string.model_zipformer_zh_en_summary,
         "sherpa-onnx-zipformer-zh-en-2023-11-22",
         "encoder-epoch-34-avg-19.int8.onnx",
         "decoder-epoch-34-avg-19.onnx",
@@ -403,7 +419,7 @@ object AsrModels {
     )
 
     val ZIPFORMER_KO = zipformer(
-        "zipformer-korean", "韩文（int8）", "约 200 MB · 韩文",
+        "zipformer-korean", R.string.model_zipformer_korean_label, R.string.model_zipformer_korean_summary,
         "sherpa-onnx-zipformer-korean-2024-06-24",
         "encoder-epoch-99-avg-1.int8.onnx",
         "decoder-epoch-99-avg-1.onnx",
@@ -412,7 +428,7 @@ object AsrModels {
     )
 
     val ZIPFORMER_JA = zipformer(
-        "zipformer-ja", "日文（int8）", "约 200 MB · 日文（ReazonSpeech）",
+        "zipformer-ja", R.string.model_zipformer_ja_label, R.string.model_zipformer_ja_summary,
         "sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01",
         "encoder-epoch-99-avg-1.int8.onnx",
         "decoder-epoch-99-avg-1.onnx",
@@ -423,8 +439,8 @@ object AsrModels {
     /** 魔搭社区（ModelScope）：pkufool 导出的 zipformer（tokens.txt 在 data/ 子目录） */
     private fun zipformerMsc(
         id: String,
-        label: String,
-        summary: String,
+        labelRes: Int,
+        summaryRes: Int,
         ownerRepo: String,
         enc: String,
         dec: String,
@@ -432,8 +448,8 @@ object AsrModels {
         bytes: Long,
     ) = ModelSpec(
         id = id,
-        label = label,
-        summary = summary,
+        labelRes = labelRes,
+        summaryRes = summaryRes,
         family = ModelFamily.ZIPFORMER,
         kind = ModelKind.ZIPFORMER_TRANSDUCER,
         dirName = id,
@@ -450,14 +466,14 @@ object AsrModels {
     )
 
     val ZIPFORMER_SMALL_MSC = zipformerMsc(
-        "zipformer-small-msc", "small（中英粤，魔搭）", "约 60 MB · 中/英/粤 · 魔搭社区",
+        "zipformer-small-msc", R.string.model_zipformer_small_msc_label, R.string.model_zipformer_small_msc_summary,
         "pkufool/zipformer-small",
         "encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx",
         200L * 1024 * 1024,
     )
 
     val ZIPFORMER_LARGE_MSC = zipformerMsc(
-        "zipformer-large-msc", "large（魔搭）", "约 180 MB · 多语言 · 魔搭社区",
+        "zipformer-large-msc", R.string.model_zipformer_large_msc_label, R.string.model_zipformer_large_msc_summary,
         "pkufool/zipformer-large",
         "encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx",
         400L * 1024 * 1024,

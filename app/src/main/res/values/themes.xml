@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compose 绘制全部内容，仅提供窗口底色（DayNight 由 values-night 提供） -->
+<resources>
+    <style name="Theme.VoiceIme" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- 状态栏与页面同底色，浅色模式下用深色图标保证可见 -->
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

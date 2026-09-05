@@ -71,7 +71,7 @@ class StreamingPipeline(
     fun onSessionStart() {
         previewJob?.cancel()
         val jobSession = sessionProvider()
-        AppLog.i("StreamingPipeline", "会话 #$jobSession 流式管线启动")
+        AppLog.i("StreamingPipeline", "session #$jobSession streaming pipeline started")
         previewJob = scope.launch(Dispatchers.IO) {
             try {
                 while (sessionProvider() == jobSession && recordingProvider()) {
@@ -99,10 +99,12 @@ class StreamingPipeline(
                             }
                         }
                     } catch (t: Throwable) {
+                        if (t is kotlinx.coroutines.CancellationException) return@launch
                         AppLog.w("StreamingPipeline", "Preview decode failed", t)
                     }
                 }
             } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) return@launch
                 AppLog.w("StreamingPipeline", "Preview worker stopped", t)
             }
         }
@@ -110,7 +112,7 @@ class StreamingPipeline(
 
     /** 会话结束/重置：停协程、清状态 */
     fun reset() {
-        AppLog.i("StreamingPipeline", "流式管线重置")
+        AppLog.i("StreamingPipeline", "streaming pipeline reset")
         workerJobs.forEach { it.cancel() }
         workerJobs.clear()
         previewJob?.cancel()
@@ -197,10 +199,12 @@ class StreamingPipeline(
                                 appendOrdered(seq, text.trim(), jobSession)
                             }
                         } catch (t: Throwable) {
+                            if (t is kotlinx.coroutines.CancellationException) return@launch
                             AppLog.w("StreamingPipeline", "Partial decode failed", t)
                         }
                     }
                 } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) return@launch
                     AppLog.w("StreamingPipeline", "Partial worker stopped", t)
                 }
             }
@@ -240,7 +244,7 @@ class StreamingPipeline(
         }
         if (toAppend != null && sessionProvider() == jobSession) {
             synchronized(lock) { fixedLines.addAll(toAppend) }
-            AppLog.i("StreamingPipeline", "分段固化 #$seq: ${text.take(40)}")
+            AppLog.i("StreamingPipeline", "segment fixed #$seq: ${text.take(40)}")
             emitPreview()
         }
     }

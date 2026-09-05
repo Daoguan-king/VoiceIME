@@ -47,14 +47,20 @@ object DownloadNotifier {
         }
     }
 
-    /** 下载进行中：total<=0 时为不确定进度（如 HF 多文件） */
+    /** 下载进行中：total<=0 时为不确定进度（如 HF 多文件）；同时推送给应用内进度条 */
     fun progress(context: Context, spec: ModelSpec, downloaded: Long, total: Long, fileDesc: String = "") {
+        com.voiceime.data.DownloadProgressBus.update(
+            modelLabel = context.getString(spec.labelRes),
+            phase = fileDesc.ifBlank { context.getString(R.string.notifier_downloading, context.getString(spec.labelRes)) },
+            downloaded = downloaded,
+            total = total,
+        )
         active = true
         val now = android.os.SystemClock.elapsedRealtime()
         // 节流：两次通知至少间隔 300ms（1GB 模型若每 256KB 更新会有数千次 notify，被系统限流）
         if (now - lastProgressAt < 300 && downloaded < total) return
         lastProgressAt = now
-        val title = context.getString(R.string.notifier_downloading, spec.label)
+        val title = context.getString(R.string.notifier_downloading, context.getString(spec.labelRes))
         val text = if (fileDesc.isNotBlank()) {
             fileDesc
         } else {
@@ -73,12 +79,13 @@ object DownloadNotifier {
     fun done(context: Context, spec: ModelSpec) {
         active = false
         lastProgressAt = 0L
+        com.voiceime.data.DownloadProgressBus.clear()
         notify(
             context,
             baseBuilder(
                 context,
                 context.getString(R.string.notifier_done_title),
-                context.getString(R.string.notifier_done_body, spec.label),
+                context.getString(R.string.notifier_done_body, context.getString(spec.labelRes)),
             ).setProgress(0, 0, false),
         )
     }
@@ -86,12 +93,13 @@ object DownloadNotifier {
     fun failed(context: Context, spec: ModelSpec, reason: String) {
         active = false
         lastProgressAt = 0L
+        com.voiceime.data.DownloadProgressBus.clear()
         notify(
             context,
             baseBuilder(
                 context,
                 context.getString(R.string.notifier_failed_title),
-                context.getString(R.string.notifier_failed_body, spec.label, reason),
+                context.getString(R.string.notifier_failed_body, context.getString(spec.labelRes), reason),
             ).setProgress(0, 0, false),
         )
     }

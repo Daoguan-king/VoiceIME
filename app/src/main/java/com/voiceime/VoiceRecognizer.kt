@@ -55,7 +55,7 @@ class VoiceRecognizer(
      * 损坏或不兼容，需在设置中删除该模型重新下载。
      */
     private fun createRecognizer(): OfflineRecognizer = try {
-        AppLog.i(TAG, "开始加载模型: ${spec.id} @ ${modelDir.absolutePath}, threads=$numThreads, language=$language")
+        AppLog.i(TAG, "start loading model: ${spec.id} @ ${modelDir.absolutePath}, threads=$numThreads, language=$language")
         if (spec.kind == ModelKind.MOONSHINE_V2) {
             // manyeyes 魔搭镜像的 tokens.txt 是明文格式，sherpa-onnx Moonshine v2
             // 会按 base64 解码，遇到 <unk> 等特殊 token 直接 exit 杀死进程；
@@ -136,10 +136,10 @@ class VoiceRecognizer(
             }
         },
         ).also {
-            AppLog.i(TAG, "识别器创建成功: ${spec.id}")
+            AppLog.i(TAG, "recognizer created: ${spec.id}")
         }
     } catch (t: Throwable) {
-        AppLog.e(TAG, "模型加载失败（文件可能损坏或不兼容，请在设置中删除该模型后重新下载）: ${spec.id}", t)
+        AppLog.e(TAG, "model load failed (files may be corrupted or incompatible; delete the model in settings and re-download): ${spec.id}", t)
         throw t
     }
 
@@ -160,7 +160,7 @@ class VoiceRecognizer(
             val result = recognizer.getResult(stream)
             val costMs = android.os.SystemClock.elapsedRealtime() - startMs
             if (costMs > 5000) {
-                AppLog.w(TAG, "解码偏慢: ${costMs}ms（${samples.size / sampleRate}s 音频）")
+                AppLog.w(TAG, "slow decode: ${costMs}ms for ${samples.size / sampleRate}s audio")
             }
             return DecodeResult(
                 text = result.text,
@@ -168,7 +168,7 @@ class VoiceRecognizer(
                 event = result.event ?: "",
             )
         } catch (t: Throwable) {
-            AppLog.e(TAG, "解码失败（${samples.size} samples，已耗时 ${android.os.SystemClock.elapsedRealtime() - startMs}ms）", t)
+            AppLog.e(TAG, "decode failed (${samples.size} samples, elapsed ${android.os.SystemClock.elapsedRealtime() - startMs}ms)", t)
             throw t
         } finally {
             stream.release()
@@ -190,7 +190,7 @@ class VoiceRecognizer(
 
     fun release() {
         // 先落盘再释放：若 release 触发原生崩溃，日志尾迹能定位到这一步
-        AppLog.i(TAG, "识别器释放: ${spec.id}")
+        AppLog.i(TAG, "recognizer released: ${spec.id}")
         recognizer.release()
     }
 }

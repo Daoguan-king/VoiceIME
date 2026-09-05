@@ -10,17 +10,32 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
-import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
-import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.k2fsa.sherpa.onnx.TenVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
+import com.voiceime.ui.panel.PanelScreen
+import com.voiceime.ui.panel.PanelUiState
+import com.voiceime.ui.theme.VoiceImeTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +46,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 
 /**
@@ -38,8 +55,10 @@ import kotlinx.coroutines.withContext
  *
  * 职责边界：本类只做录音采集、VAD 判停、识别器管理与 IME 生命周期/UI；
  * 流式解码（段队列 + 并发 worker + 乱序重排 + 滑动窗口预览）在 [StreamingPipeline]。
+ * UI 为 Compose 面板（Xime 同款接线：Service 实现三 Owner，ComposeView 作输入视图，
+ * 录音线程经 [PanelUiState] StateFlow 推送状态）。
  */
-class VoiceImeService : InputMethodService() {
+class VoiceImeService : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
 
     companion object {
         private const val TAG = "VoiceIme"
@@ -51,13 +70,52 @@ class VoiceImeService : InputMethodService() {
         // 时间分片降级参数（VAD 不可用时使用）
         private const val PARTIAL_INTERVAL_MS = 700L
         private const val MIN_SEGMENT_BYTES = 19_200
+
+        /** 面板是否正在录音（应用内"输入法测试"互斥检测用，同进程可见） */
+        @Volatile
+        var panelRecording = false
+            private set
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    // ---- Compose 面板三 Owner 接线（Xime 同款） ----
+    private val lifecycleRegistry = LifecycleRegistry(this)
+    private val savedStateRegistryController = SavedStateRegistryController.create(this)
+    private val serviceViewModelStore = ViewModelStore()
+
+    override val lifecycle: Lifecycle
+        get() = lifecycleRegistry
+
+    override val savedStateRegistry: SavedStateRegistry
+        get() = savedStateRegistryController.savedStateRegistry
+
+    override val viewModelStore: ViewModelStore
+        get() = serviceViewModelStore
+
+    /** 面板状态：录音线程/主线程均可推送 */
+    private val _panelState = MutableStateFlow(PanelUiState())
+
+    /** 面板电平动画参数（设置页修改后经 onStartInputView 刷新生效）。
+     *  lazy：构造期 baseContext 未 attach，不能在字段初始化器里读 prefs */
+    private val panelAnimParams by lazy { MutableStateFlow(UiParams.readAnim(this)) }
+
+    override fun attachBaseContext(base: Context) {
+        // 应用界面语言（AppLocale）对 IME 面板文案同样生效
+        super.attachBaseContext(AppLocale.wrap(base))
+    }
+
     override fun onCreate() {
         super.onCreate()
         AppLog.init(this)
+        savedStateRegistryController.performRestore(null)
+        // ComposeView 依赖 ViewTree Owner，挂到 IME 窗口 decorView 上
+        window.window?.decorView?.setViewTreeLifecycleOwner(this)
+        window.window?.decorView?.setViewTreeSavedStateRegistryOwner(this)
+        window.window?.decorView?.setViewTreeViewModelStoreOwner(this)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        updateLanguageLabel()
     }
 
     /** 识别器创建/重建锁（解码本身不锁，支持并发解码） */
@@ -74,6 +132,12 @@ class VoiceImeService : InputMethodService() {
 
     @Volatile
     private var recording = false
+
+    /** recording 赋值统一入口：同步 companion 的 panelRecording（供应用内测试互斥检测） */
+    private fun setRecording(value: Boolean) {
+        recording = value
+        panelRecording = value
+    }
 
     @Volatile
     private var session = 0L
@@ -114,11 +178,6 @@ class VoiceImeService : InputMethodService() {
     private var recognizer: VoiceRecognizer? = null
     private var recognizerKey = ""
 
-    private var micButton: Button? = null
-    private var langButton: Button? = null
-    private var statusText: TextView? = null
-    private var levelView: LevelView? = null
-
     /** 底部手势条/虚拟按键安全区：固定 24dp + 系统 insets */
     private val bottomInsetBase: Int by lazy { dp(24) }
 
@@ -139,31 +198,41 @@ class VoiceImeService : InputMethodService() {
         get() = prefs().getBoolean(Prefs.KEY_AUTO_SWITCH, true)
 
     override fun onCreateInputView(): View {
-        val root = LayoutInflater.from(this).inflate(R.layout.ime_root, null)
-        micButton = root.findViewById(R.id.mic_button)
-        langButton = root.findViewById(R.id.lang_button)
-        statusText = root.findViewById(R.id.status_text)
-        levelView = root.findViewById(R.id.level_view)
-        micButton?.setOnClickListener { toggle() }
-        langButton?.setOnClickListener { cycleLanguage() }
-        updateLanguageButton()
-
-        // 全面屏手势/虚拟按键：底部留出导航条安全区
-        root.setOnApplyWindowInsetsListener { v, insets ->
-            val bottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.getInsets(WindowInsets.Type.navigationBars()).bottom
-            } else {
-                @Suppress("DEPRECATION")
-                insets.systemWindowInsetBottom
+        return ComposeView(this).apply {
+            setViewCompositionStrategy(
+                ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool,
+            )
+            // 全面屏手势/虚拟按键：底部留出导航条安全区（与旧面板一致）
+            setOnApplyWindowInsetsListener { v, insets ->
+                val bottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+                } else {
+                    @Suppress("DEPRECATION")
+                    insets.systemWindowInsetBottom
+                }
+                v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, bottomInsetBase + bottom)
+                insets
             }
-            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, bottomInsetBase + bottom)
-            insets
+            setContent {
+                val state by _panelState.collectAsState()
+                val anim by panelAnimParams.collectAsState()
+                VoiceImeTheme(dynamicColor = UiParams.dynamicColor(this@VoiceImeService)) {
+                    PanelScreen(
+                        state = state,
+                        anim = anim,
+                        onToggle = ::toggle,
+                        onCycleLanguage = ::cycleLanguage,
+                    )
+                }
+            }
         }
-        return root
     }
 
     override fun onStartInputView(editorInfo: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(editorInfo, restarting)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        // 设置页可能改过动画参数/开关，显示面板时刷新
+        panelAnimParams.value = UiParams.readAnim(this)
         AppLog.i(TAG, "onStartInputView restarting=$restarting")
         // 仿 Google 语音输入：被切换过来即自动开始录音
         if (!recording) start()
@@ -172,16 +241,19 @@ class VoiceImeService : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         AppLog.i(TAG, "onFinishInputView finishing=$finishingInput recording=$recording")
+        // 框架的 super.onDestroy() 也会走到这里，此时生命周期可能已 DESTROYED，
+        // 只有仍在 RESUMED 状态才合法回退到 PAUSED
+        if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        }
         // 离开时丢弃未完成的录音
         if (recording) {
-            recording = false
+            setRecording(false)
             session++ // 使旧任务的收尾逻辑失效
         }
         recordJob?.cancel()
         resetSessionState()
-        micButton?.text = getString(R.string.btn_start)
-        micButton?.setBackgroundResource(R.drawable.btn_mic_bg)
-        levelView?.setRecording(false)
+        _panelState.update { it.copy(recording = false) }
     }
 
     private fun toggle() {
@@ -197,7 +269,7 @@ class VoiceImeService : InputMethodService() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            AppLog.w(TAG, "无麦克风权限，无法开始录音")
+            AppLog.w(TAG, "no mic permission, cannot start recording")
             setStatus(getString(R.string.status_no_permission))
             Toast.makeText(this, R.string.status_no_permission, Toast.LENGTH_SHORT).show()
             val intent = Intent(context, PermissionActivity::class.java)
@@ -209,7 +281,7 @@ class VoiceImeService : InputMethodService() {
         val spec = modelSpec
         val modelDir = VoiceModelManager.resolveModelDir(context, spec)
         if (modelDir == null) {
-            AppLog.i(TAG, "模型缺失，自动下载: ${spec.id}")
+            AppLog.i(TAG, "model missing, auto download: ${spec.id}")
             setStatus(getString(R.string.status_downloading))
             scope.launch {
                 val custom = prefs().getString(Prefs.customUrlKey(spec.id), null)
@@ -221,18 +293,21 @@ class VoiceImeService : InputMethodService() {
 
         val mySession = ++session
         recordJob?.cancel()
-        recording = true
+        setRecording(true)
         sessionStartMs = SystemClock.elapsedRealtime()
-        AppLog.i(TAG, "开始录音会话 #$mySession，模型: ${spec.id}，目录: ${modelDir.absolutePath}")
+        AppLog.i(TAG, "recording session #$mySession, model: ${spec.id}, dir: ${modelDir.absolutePath}")
         sessionModelDir = modelDir
         sessionModelId = spec.id
         sessionRecognizerKey = spec.id + "|" + modelDir.absolutePath + "|" + language + "|" + debug.decodeThreads.coerceIn(1, 8)
         resetSessionState()
         initVad()
-        setStatus(getString(R.string.status_recording))
-        micButton?.text = getString(R.string.btn_stop)
-        micButton?.setBackgroundResource(R.drawable.btn_mic_bg_rec)
-        levelView?.setRecording(true)
+        _panelState.update {
+            it.copy(
+                recording = true,
+                statusText = getString(R.string.status_recording),
+                level = 0f,
+            )
+        }
 
         pipeline.onSessionStart()
 
@@ -257,22 +332,16 @@ class VoiceImeService : InputMethodService() {
                     }
                 }
             } catch (t: Throwable) {
-                AppLog.e(TAG, "语音识别失败: " + (t.message ?: t.javaClass.simpleName))
+                AppLog.e(TAG, "recognition failed: " + (t.message ?: t.javaClass.simpleName))
                 withContext(Dispatchers.Main) { setStatus(t.message ?: "error") }
             } finally {
                 if (session == mySession) {
-                    recording = false
+                    setRecording(false)
                     resetSessionState()
                     releaseVad()
-                    // UI 更新必须回到主线程：ValueAnimator 只能在 Looper 线程操作。
-                    // 协程被取消时 withContext 会直接抛 CancellationException，
-                    // 因此用独立的 Main 协程确保收尾 UI 一定执行。
-                    scope.launch(Dispatchers.Main) {
-                        if (session == mySession) {
-                            micButton?.text = getString(R.string.btn_start)
-                            micButton?.setBackgroundResource(R.drawable.btn_mic_bg)
-                            levelView?.setRecording(false)
-                        }
+                    // 面板状态复位（StateFlow 线程安全，无需切主线程）
+                    if (session == mySession) {
+                        _panelState.update { it.copy(recording = false) }
                     }
                 }
             }
@@ -281,8 +350,8 @@ class VoiceImeService : InputMethodService() {
 
     /** 结束录音：录音循环退出后，同一个协程继续做整段识别并上屏 */
     private fun stopAndRecognize() {
-        AppLog.i(TAG, "手动结束录音")
-        recording = false
+        AppLog.i(TAG, "recording stopped manually")
+        setRecording(false)
     }
 
     private fun commit(text: String) {
@@ -292,7 +361,7 @@ class VoiceImeService : InputMethodService() {
             // 输入连接可能已失效（如输入法窗口正在关闭），不影响后续状态
             AppLog.w(TAG, "commitText failed", t)
         }
-        AppLog.i(TAG, "识别上屏: " + text.take(60))
+        AppLog.i(TAG, "committed: " + text.take(60))
         setStatus(getString(R.string.status_done))
         if (autoSwitchBack) switchBackToPreviousIme()
     }
@@ -347,14 +416,15 @@ class VoiceImeService : InputMethodService() {
         val cur = language
         val nextIndex = (values.indexOf(cur) + 1).coerceAtLeast(0) % values.size
         prefs().edit().putString(Prefs.KEY_LANGUAGE, values[nextIndex]).apply()
-        updateLanguageButton()
+        updateLanguageLabel()
     }
 
-    private fun updateLanguageButton() {
+    /** 刷新面板上的语言标签 */
+    private fun updateLanguageLabel() {
         val values = resources.getStringArray(R.array.language_values)
         val labels = resources.getStringArray(R.array.language_labels)
         val idx = values.indexOf(language).coerceAtLeast(0)
-        langButton?.text = getString(R.string.lang_button_prefix) + labels[idx]
+        _panelState.update { it.copy(languageLabel = labels[idx]) }
     }
 
     // ---------------- VAD 与流式入口 ----------------
@@ -424,8 +494,8 @@ class VoiceImeService : InputMethodService() {
                 pipeline.onSpeechDetected()
             } else if (hasDetectedSpeech && now - lastSpeechAtMs >= debug.autoStopMs) {
                 // 静音自动结束
-                AppLog.i(TAG, "静音超时自动结束录音")
-                recording = false
+                AppLog.i(TAG, "auto stop on silence timeout")
+                setRecording(false)
                 return
             }
             // 出队已完成的语音段 → 固化一行
@@ -433,7 +503,7 @@ class VoiceImeService : InputMethodService() {
                 val seg = vad.front()
                 val segSamples = seg.samples
                 vad.pop()
-                AppLog.i(TAG, "VAD 出段: ${segSamples.size} samples")
+                AppLog.i(TAG, "VAD segment: ${segSamples.size} samples")
                 pipeline.onSegmentCompleted(segSamples)
             }
         } catch (t: Throwable) {
@@ -494,7 +564,7 @@ class VoiceImeService : InputMethodService() {
             AudioFormat.ENCODING_PCM_16BIT,
         )
         if (minBuf <= 0) {
-            AppLog.e(TAG, "AudioRecord.getMinBufferSize 异常: $minBuf")
+            AppLog.e(TAG, "AudioRecord.getMinBufferSize invalid: $minBuf")
             return ByteArray(0)
         }
         // 读取粒度可调（官方 Demo 为 32ms/512 samples），越小 VAD 响应越快
@@ -507,7 +577,7 @@ class VoiceImeService : InputMethodService() {
             bufferSize,
         )
         if (record.state != AudioRecord.STATE_INITIALIZED) {
-            AppLog.e(TAG, "AudioRecord 初始化失败，无法录音")
+            AppLog.e(TAG, "AudioRecord init failed")
             record.release()
             return ByteArray(0)
         }
@@ -517,8 +587,8 @@ class VoiceImeService : InputMethodService() {
             while (recording && currentCoroutineContext().isActive) {
                 // 单次录音时长上限，防止内存无限增长
                 if (SystemClock.elapsedRealtime() - sessionStartMs > MAX_SESSION_MS) {
-                    AppLog.i(TAG, "达到单次录音时长上限，自动结束")
-                    recording = false
+                    AppLog.i(TAG, "max session duration reached, auto stop")
+                    setRecording(false)
                     break
                 }
                 val n = record.read(buf, 0, buf.size)
@@ -526,7 +596,7 @@ class VoiceImeService : InputMethodService() {
                     n > 0 -> {
                         synchronized(bufferLock) { pcmBuffer.write(buf, 0, n) }
                         val samples = pcmToFloatArray(buf, 0, n)
-                        levelView?.setLevel(rmsLevel(samples))
+                        _panelState.update { it.copy(level = rmsLevel(samples)) }
                         processAudioChunk(samples, buf, n)
                     }
                     n < 0 -> break
@@ -639,8 +709,12 @@ class VoiceImeService : InputMethodService() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         AppLog.i(TAG, "onDestroy")
+        // 先走框架销毁（其内部会触发 onFinishInputView → ON_PAUSE，须在 DESTROYED 之前），
+        // 再终结本 Service 的生命周期
+        super.onDestroy()
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         scope.cancel()
         // 释放当前识别器（若有在途解码则等待其结束，避免 JNI use-after-free）
         synchronized(recognizerLock) {
@@ -648,9 +722,11 @@ class VoiceImeService : InputMethodService() {
             recognizer = null
             recognizerKey = ""
         }
+        serviceViewModelStore.clear()
     }
 
+    /** 面板状态文本更新（任意线程可调，StateFlow 线程安全） */
     private fun setStatus(text: String) {
-        statusText?.text = text
+        _panelState.update { it.copy(statusText = text) }
     }
 }

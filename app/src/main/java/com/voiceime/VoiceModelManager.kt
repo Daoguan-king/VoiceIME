@@ -97,7 +97,7 @@ object VoiceModelManager {
         var deleted = false
         for (dir in dirs) {
             if (dir.exists()) {
-                AppLog.i(TAG, "删除模型目录: ${dir.absolutePath}")
+                AppLog.i(TAG, "delete model dir: ${dir.absolutePath}")
                 dir.deleteRecursively()
                 deleted = true
             }
@@ -178,7 +178,7 @@ object VoiceModelManager {
                         entries.add(Entry(parts[1], decoded ?: sym.toByteArray(Charsets.UTF_8)))
                     }
                     else -> {
-                        AppLog.w(TAG, "tokens.txt 存在异常行，跳过 base64 转换: ${dir.name}")
+                        AppLog.w(TAG, "tokens.txt has malformed lines, skip base64 conversion: ${dir.name}")
                         return
                     }
                 }
@@ -212,9 +212,9 @@ object VoiceModelManager {
                 tmp.copyTo(f, overwrite = true)
                 tmp.delete()
             }
-            AppLog.i(TAG, "tokens.txt 已转换为 base64 格式（Moonshine v2 兼容）: ${dir.name}")
+            AppLog.i(TAG, "tokens.txt converted to base64 (Moonshine v2 compatible): ${dir.name}")
         } catch (t: Throwable) {
-            AppLog.w(TAG, "tokens.txt base64 转换失败: " + (t.message ?: t.javaClass.simpleName))
+            AppLog.w(TAG, "tokens.txt base64 conversion failed: " + (t.message ?: t.javaClass.simpleName))
         }
     }
 
@@ -230,14 +230,14 @@ object VoiceModelManager {
         withContext(Dispatchers.IO) {
             val root = specDir(context, spec)
             if (isModelReady(root, spec)) {
-                AppLog.i(TAG, "模型已就绪，跳过下载: ${spec.id} @ ${root.absolutePath}")
+                AppLog.i(TAG, "model ready, skip download: ${spec.id} @ ${root.absolutePath}")
                 return@withContext true
             }
-            AppLog.i(TAG, "开始下载模型: ${spec.id}（自定义源: ${customUrl ?: "无"}）")
-            DownloadNotifier.progress(context, spec, 0, 0, context.getString(R.string.notifier_preparing, spec.label))
+            AppLog.i(TAG, "start downloading model: ${spec.id}(custom url: ${customUrl ?: "none"})")
+            DownloadNotifier.progress(context, spec, 0, 0, context.getString(R.string.notifier_preparing, context.getString(spec.labelRes)))
 
             if (!hasEnoughSpace(context, spec.requiredBytes)) {
-                val msg = "磁盘空间不足（需要约 " + (spec.requiredBytes / 1048576) + " MB）"
+                val msg = "insufficient disk space (need about " + (spec.requiredBytes / 1048576) + " MB)"
                 AppLog.e(TAG, msg)
                 DownloadNotifier.failed(context, spec, msg)
                 return@withContext false
@@ -277,7 +277,7 @@ object VoiceModelManager {
     ): Boolean {
         val archive = File(context.cacheDir, "voiceime-model-" + System.currentTimeMillis() + ".bin")
         try {
-            AppLog.i(TAG, "压缩包源: $url")
+            AppLog.i(TAG, "archive source: $url")
             val ok = downloadFile(url, archive) { done, total ->
                 DownloadNotifier.progress(context, spec, done, total)
             }
@@ -290,14 +290,14 @@ object VoiceModelManager {
             }
             archive.delete()
             if (isModelReady(root, spec)) {
-                AppLog.i(TAG, "模型下载成功（压缩包）: $url")
+                AppLog.i(TAG, "model downloaded (archive): $url")
                 DownloadNotifier.done(context, spec)
                 return true
             }
-            AppLog.w(TAG, "压缩包解压后校验不完整: $url")
+            AppLog.w(TAG, "incomplete after extraction: $url")
             return false
         } catch (t: Throwable) {
-            AppLog.w(TAG, "压缩包源失败: $url - " + (t.message ?: t.javaClass.simpleName))
+            AppLog.w(TAG, "archive source failed: $url - " + (t.message ?: t.javaClass.simpleName))
             return false
         } finally {
             archive.delete()
@@ -312,7 +312,7 @@ object VoiceModelManager {
             for (rel in source.files) {
                 val target = File(root, rel)
                 target.parentFile?.mkdirs()
-                AppLog.i(TAG, "镜像源[${source.name}]文件: $rel")
+                AppLog.i(TAG, "mirror[${source.name}] file: $rel")
                 val ok = downloadFile(source.baseUrl + rel, target) { done, total ->
                     DownloadNotifier.progress(context, spec, done, total, rel)
                 }
@@ -323,14 +323,14 @@ object VoiceModelManager {
                 }
             }
             if (allOk && isModelReady(root, spec)) {
-                AppLog.i(TAG, "模型下载成功（镜像 ${source.name}）: ${spec.id}")
+                AppLog.i(TAG, "model downloaded (mirror ${source.name}): ${spec.id}")
                 DownloadNotifier.done(context, spec)
                 return true
             }
-            if (!allOk) AppLog.w(TAG, "镜像源[${source.name}]文件下载失败: $failedFile")
+            if (!allOk) AppLog.w(TAG, "mirror[${source.name}] file download failed: $failedFile")
             return false
         } catch (t: Throwable) {
-            AppLog.w(TAG, "镜像源[${source.name}]失败: " + (t.message ?: t.javaClass.simpleName))
+            AppLog.w(TAG, "mirror[${source.name}] failed: " + (t.message ?: t.javaClass.simpleName))
             return false
         }
     }
@@ -388,7 +388,7 @@ object VoiceModelManager {
         ArchiveFormat.BZIP2 -> extractTar(archive, tmp, TarCompression.BZIP2, onProgress)
         ArchiveFormat.GZIP -> extractTar(archive, tmp, TarCompression.GZIP, onProgress)
         ArchiveFormat.TAR -> extractTar(archive, tmp, TarCompression.NONE, onProgress)
-        ArchiveFormat.UNKNOWN -> throw IOException("不支持的压缩包格式: ${archive.name}")
+        ArchiveFormat.UNKNOWN -> throw IOException("unsupported archive format: ${archive.name}")
     }
 
     /** 压缩包格式：根据文件头魔数识别（zip / bzip2 / gzip / 裸 tar） */
@@ -600,7 +600,7 @@ object VoiceModelManager {
             // 下载完成：确保进度条到 100%（否则会停在 99% 直到解压结束）
             onProgress(written, expected)
             if (expected > 0 && written != expected) {
-                AppLog.w(TAG, "大小不匹配: expected=$expected got=$written url=$url")
+                AppLog.w(TAG, "size mismatch: expected=$expected got=$written url=$url")
                 return false
             }
             // 完整才落正式文件名（同卷 rename 原子生效；失败回退复制）
@@ -610,7 +610,7 @@ object VoiceModelManager {
             }
             return true
         } catch (t: Throwable) {
-            AppLog.w(TAG, "下载异常: $url - " + (t.message ?: t.javaClass.simpleName))
+            AppLog.w(TAG, "download error: $url - " + (t.message ?: t.javaClass.simpleName))
             return false
         } finally {
             part.delete()
@@ -623,7 +623,7 @@ object VoiceModelManager {
         val stat = StatFs(modelRoot(context).absolutePath)
         stat.availableBytes >= requiredBytes
     } catch (t: Throwable) {
-        AppLog.w(TAG, "空间检查失败，按通过处理")
+        AppLog.w(TAG, "space check failed, treat as pass")
         true
     }
 }

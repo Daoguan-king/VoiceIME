@@ -14,9 +14,9 @@
     <string name="status_empty">未识别到语音</string>
     <string name="status_no_permission">需要麦克风权限</string>
     <string name="status_model_missing">缺少模型文件</string>
-    <string name="status_downloading">正在下载 SenseVoice 模型…</string>
+    <string name="status_downloading">正在下载模型…</string>
     <string name="status_download_failed">模型下载失败</string>
-    <string name="status_model_ready">模型就绪，切换到本输入法即可说话</string>
+    <string name="status_model_ready">模型就绪，点击按钮即可说话</string>
 
     <string name="main_title">VoiceIME（SenseVoice 本地语音输入）</string>
     <string name="main_desc">供同文输入法（Trime）调用的本地语音输入法。先在系统设置中启用本输入法，再按 Trime 的语音键（VOICE_ASSIST）即可切换过来。</string>
@@ -101,6 +101,92 @@
     <string name="logs_crash">崩溃日志</string>
     <string name="logs_crash_title">崩溃日志</string>
     <string name="logs_crash_empty">无崩溃日志</string>
+    <string name="logs_view">查看日志</string>
+    <string name="logs_view_desc">运行日志、下载失败原因与崩溃记录</string>
+
+    <!-- 底部导航 -->
+    <string name="nav_home">主页</string>
+    <string name="nav_settings">设置</string>
+    <string name="nav_about">关于</string>
+
+    <!-- 主页 -->
+    <string name="home_section_model">模型下载</string>
+    <string name="home_section_options">识别选项</string>
+    <string name="home_section_test">输入法测试</string>
+    <string name="test_desc">在本页体验语音识别，不会上屏到应用。点按开始录音，再点按结束，与输入法面板一样实时流式预览。</string>
+    <string name="test_result">识别结果</string>
+    <string name="test_ime_busy">输入法面板正在录音，请先结束</string>
+    <string name="test_load_failed">模型加载失败：%1$s</string>
+
+    <!-- 设置：界面设置 -->
+    <string name="ui_group_appearance">界面设置</string>
+    <string name="ui_group_logs">日志内容</string>
+    <string name="ui_group_debug">语音识别调试参数</string>
+    <string name="label_level_animation">电平条动画</string>
+    <string name="label_dynamic_color">Material You 动态取色（Android 12+）</string>
+    <string name="label_app_language">应用语言</string>
+    <string name="ui_anim_params_title">电平条动画参数</string>
+    <string name="ui_anim_saved">已保存，面板立即生效</string>
+    <string name="ui_anim_reset_done">动画参数已恢复默认</string>
+    <string name="ui_phase_cycle_ms">相位周期 ms（200~3000）</string>
+    <string name="ui_wave_speed">波速（0.2~8）</string>
+    <string name="ui_phase_step">条间相位步长（0.05~1）</string>
+    <string name="ui_smoothing">平滑系数（0.05~1）</string>
+    <string name="ui_noise_amplitude">噪声幅度（0.2~3）</string>
+    <string name="ui_noise_floor">噪声底（0~0.5）</string>
+
+    <!-- 关于 -->
+    <string name="about_version">版本 %1$s</string>
+    <string name="repo_url">https://github.com/Daoguan-king/VoiceIME</string>
+    <string name="about_license">许可证</string>
+    <string name="about_license_body">本软件基于 MIT 许可证开源。</string>
+    <string name="about_acknowledgements">致谢：sherpa-onnx、同文输入法（Trime）、BiBi-Keyboard、Xime。</string>
+    <string name="about_downloaded_models">已下载模型</string>
+    <string name="about_no_models">暂未下载任何模型</string>
+
+    <!-- 模型类型与名称（i18n） -->
+    <string name="family_sense_voice">SenseVoice</string>
+    <string name="family_qwen3">Qwen3-ASR</string>
+    <string name="family_moonshine">Moonshine</string>
+    <string name="family_paraformer">Paraformer</string>
+    <string name="family_zipformer">Zipformer</string>
+
+    <string name="model_sensevoice_int8_label">small（int8）</string>
+    <string name="model_sensevoice_int8_summary">约 170 MB · 中/英/日/韩/粤 · 推荐</string>
+    <string name="model_sensevoice_full_label">small（fp32）</string>
+    <string name="model_sensevoice_full_summary">约 900 MB · 精度更高 · 慎选</string>
+    <string name="model_sensevoice_2025_label">small 粤语（int8，WSYue）</string>
+    <string name="model_sensevoice_2025_summary">约 170 MB · 粤语特化（ASLP-lab/WSYue-ASR，架构同 SenseVoice）· 无情感/事件</string>
+    <string name="model_qwen3_label">0.6B（int8）</string>
+    <string name="model_qwen3_summary">约 1 GB · 中英 · 实验性更强识别</string>
+    <string name="model_moonshine_tiny_en_label">tiny（英文 int8）</string>
+    <string name="model_moonshine_tiny_en_summary">约 150 MB · 英文</string>
+    <string name="model_moonshine_base_en_label">base（英文 int8）</string>
+    <string name="model_moonshine_base_en_summary">约 300 MB · 英文，更准</string>
+    <string name="model_moonshine_tiny_ko_label">tiny（韩文量化）</string>
+    <string name="model_moonshine_tiny_ko_summary">约 60 MB · 韩文</string>
+    <string name="model_moonshine_tiny_ja_label">tiny（日文量化）</string>
+    <string name="model_moonshine_tiny_ja_summary">约 60 MB · 日文</string>
+    <string name="model_moonshine_base_zh_label">base（中文量化）</string>
+    <string name="model_moonshine_base_zh_summary">约 120 MB · 中文</string>
+    <string name="model_moonshine_tiny_zh_msc_label">tiny（中文 int8，魔搭）</string>
+    <string name="model_moonshine_tiny_zh_msc_summary">约 30 MB · 中文 · 魔搭社区</string>
+    <string name="model_moonshine_base_zh_msc_label">base（中文 int8，魔搭）</string>
+    <string name="model_moonshine_base_zh_msc_summary">约 100 MB · 中文 · 魔搭社区</string>
+    <string name="model_paraformer_zh_label">中文（int8）</string>
+    <string name="model_paraformer_zh_summary">约 60 MB · 轻量中文 · 快</string>
+    <string name="model_paraformer_zh_small_label">中文 small（int8）</string>
+    <string name="model_paraformer_zh_small_summary">约 30 MB · 更小更快，精度略低</string>
+    <string name="model_zipformer_zh_en_label">中英（int8）</string>
+    <string name="model_zipformer_zh_en_summary">约 200 MB · 中英混合</string>
+    <string name="model_zipformer_korean_label">韩文（int8）</string>
+    <string name="model_zipformer_korean_summary">约 200 MB · 韩文</string>
+    <string name="model_zipformer_ja_label">日文（int8）</string>
+    <string name="model_zipformer_ja_summary">约 200 MB · 日文（ReazonSpeech）</string>
+    <string name="model_zipformer_small_msc_label">small（中英粤，魔搭）</string>
+    <string name="model_zipformer_small_msc_summary">约 60 MB · 中/英/粤 · 魔搭社区</string>
+    <string name="model_zipformer_large_msc_label">large（魔搭）</string>
+    <string name="model_zipformer_large_msc_summary">约 180 MB · 多语言 · 魔搭社区</string>
     <string-array name="model_variant_labels">
         <item>Small（int8，约 170 MB，推荐）</item>
         <item>Small（fp32，约 900 MB）</item>

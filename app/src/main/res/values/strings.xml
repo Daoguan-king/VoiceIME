@@ -14,9 +14,9 @@
     <string name="status_empty">No speech recognized</string>
     <string name="status_no_permission">Microphone permission required</string>
     <string name="status_model_missing">Model files missing</string>
-    <string name="status_downloading">Downloading SenseVoice model…</string>
+    <string name="status_downloading">Downloadingmodel…</string>
     <string name="status_download_failed">Model download failed</string>
-    <string name="status_model_ready">Model ready. Switch to this IME and speak.</string>
+    <string name="status_model_ready">Model ready. Press the button to speak.</string>
 
     <string name="main_title">VoiceIME（SenseVoice local voice input）</string>
     <string name="main_desc">Local voice input IME for Trime. Install &amp; enable this IME in system settings, then press Trime\'s voice key (VOICE_ASSIST) to switch here.</string>
@@ -101,6 +101,92 @@
     <string name="logs_crash">Crash logs</string>
     <string name="logs_crash_title">Crash logs</string>
     <string name="logs_crash_empty">No crash logs</string>
+    <string name="logs_view">View logs</string>
+    <string name="logs_view_desc">Runtime log, download failures and crash records</string>
+
+    <!-- 底部导航 -->
+    <string name="nav_home">Home</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_about">About</string>
+
+    <!-- 主页 -->
+    <string name="home_section_model">Model download</string>
+    <string name="home_section_options">Recognition options</string>
+    <string name="home_section_test">Input method test</string>
+    <string name="test_desc">Test recognition here without committing to apps. Tap to record, tap again to stop. Streams a live preview like the IME panel.</string>
+    <string name="test_result">Result</string>
+    <string name="test_ime_busy">The IME panel is recording. Stop it first.</string>
+    <string name="test_load_failed">Model load failed: %1$s</string>
+
+    <!-- 设置：界面设置 -->
+    <string name="ui_group_appearance">Appearance</string>
+    <string name="ui_group_logs">Logs</string>
+    <string name="ui_group_debug">ASR debug params</string>
+    <string name="label_level_animation">Level bar animation</string>
+    <string name="label_dynamic_color">Material You dynamic color (Android 12+)</string>
+    <string name="label_app_language">App language</string>
+    <string name="ui_anim_params_title">Level bar animation params</string>
+    <string name="ui_anim_saved">Saved, applies to the panel immediately</string>
+    <string name="ui_anim_reset_done">Animation defaults restored</string>
+    <string name="ui_phase_cycle_ms">Phase cycle ms (200~3000)</string>
+    <string name="ui_wave_speed">Wave speed (0.2~8)</string>
+    <string name="ui_phase_step">Bar phase step (0.05~1)</string>
+    <string name="ui_smoothing">Smoothing (0.05~1)</string>
+    <string name="ui_noise_amplitude">Noise amplitude (0.2~3)</string>
+    <string name="ui_noise_floor">Noise floor (0~0.5)</string>
+
+    <!-- 关于 -->
+    <string name="about_version">Version %1$s</string>
+    <string name="repo_url">https://github.com/Daoguan-king/VoiceIME</string>
+    <string name="about_license">License</string>
+    <string name="about_license_body">This app is licensed under the MIT License.</string>
+    <string name="about_acknowledgements">Thanks to sherpa-onnx, Trime (同文输入法), BiBi-Keyboard and Xime.</string>
+    <string name="about_downloaded_models">Downloaded models</string>
+    <string name="about_no_models">No models downloaded yet</string>
+
+    <!-- 模型类型与名称（i18n） -->
+    <string name="family_sense_voice">SenseVoice</string>
+    <string name="family_qwen3">Qwen3-ASR</string>
+    <string name="family_moonshine">Moonshine</string>
+    <string name="family_paraformer">Paraformer</string>
+    <string name="family_zipformer">Zipformer</string>
+
+    <string name="model_sensevoice_int8_label">Small (int8)</string>
+    <string name="model_sensevoice_int8_summary">~170 MB · zh/en/ja/ko/yue · recommended</string>
+    <string name="model_sensevoice_full_label">Small (fp32)</string>
+    <string name="model_sensevoice_full_summary">~900 MB · higher accuracy · large download</string>
+    <string name="model_sensevoice_2025_label">Small Cantonese (int8, WSYue)</string>
+    <string name="model_sensevoice_2025_summary">~170 MB · Cantonese-focused (ASLP-lab/WSYue-ASR, SenseVoice arch) · no emotion/event</string>
+    <string name="model_qwen3_label">0.6B (int8)</string>
+    <string name="model_qwen3_summary">~1 GB · zh/en · experimental</string>
+    <string name="model_moonshine_tiny_en_label">Tiny (English int8)</string>
+    <string name="model_moonshine_tiny_en_summary">~150 MB · English</string>
+    <string name="model_moonshine_base_en_label">Base (English int8)</string>
+    <string name="model_moonshine_base_en_summary">~300 MB · English, more accurate</string>
+    <string name="model_moonshine_tiny_ko_label">Tiny (Korean quantized)</string>
+    <string name="model_moonshine_tiny_ko_summary">~60 MB · Korean</string>
+    <string name="model_moonshine_tiny_ja_label">Tiny (Japanese quantized)</string>
+    <string name="model_moonshine_tiny_ja_summary">~60 MB · Japanese</string>
+    <string name="model_moonshine_base_zh_label">Base (Chinese quantized)</string>
+    <string name="model_moonshine_base_zh_summary">~120 MB · Chinese</string>
+    <string name="model_moonshine_tiny_zh_msc_label">Tiny (Chinese int8, ModelScope)</string>
+    <string name="model_moonshine_tiny_zh_msc_summary">~30 MB · Chinese · ModelScope</string>
+    <string name="model_moonshine_base_zh_msc_label">Base (Chinese int8, ModelScope)</string>
+    <string name="model_moonshine_base_zh_msc_summary">~100 MB · Chinese · ModelScope</string>
+    <string name="model_paraformer_zh_label">Chinese (int8)</string>
+    <string name="model_paraformer_zh_summary">~60 MB · lightweight Chinese · fast</string>
+    <string name="model_paraformer_zh_small_label">Chinese small (int8)</string>
+    <string name="model_paraformer_zh_small_summary">~30 MB · smaller &amp; faster, slightly less accurate</string>
+    <string name="model_zipformer_zh_en_label">zh-en (int8)</string>
+    <string name="model_zipformer_zh_en_summary">~200 MB · mixed Chinese-English</string>
+    <string name="model_zipformer_korean_label">Korean (int8)</string>
+    <string name="model_zipformer_korean_summary">~200 MB · Korean</string>
+    <string name="model_zipformer_ja_label">Japanese (int8)</string>
+    <string name="model_zipformer_ja_summary">~200 MB · Japanese (ReazonSpeech)</string>
+    <string name="model_zipformer_small_msc_label">Small (zh/en/yue, ModelScope)</string>
+    <string name="model_zipformer_small_msc_summary">~60 MB · zh/en/yue · ModelScope</string>
+    <string name="model_zipformer_large_msc_label">Large (ModelScope)</string>
+    <string name="model_zipformer_large_msc_summary">~180 MB · multilingual · ModelScope</string>
     <string-array name="model_variant_labels">
         <item>Small (int8, ~170 MB, recommended)</item>
         <item>Small (fp32, ~900 MB)</item>
